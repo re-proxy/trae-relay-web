@@ -2,14 +2,11 @@ services:
   relay:
     build: .
     ports:
-      - "127.0.0.1:${RELAY_PORT:-8317}:8317"
+      - "0.0.0.0:8317:8317"
+    env_file:
+      - .env
     environment:
-      RELAY_ADMIN_PASSWORD: ${RELAY_ADMIN_PASSWORD:?set RELAY_ADMIN_PASSWORD in .env}
-      RELAY_MASTER_KEY: ${RELAY_MASTER_KEY:?set RELAY_MASTER_KEY in .env}
-      RELAY_MAX_CONCURRENT: ${RELAY_MAX_CONCURRENT:-2}
-      RELAY_SECURE_COOKIE: ${RELAY_SECURE_COOKIE:-false}
-      TRAE_IDE_VERSION: ${TRAE_IDE_VERSION:-3.4.0}
-      TRAE_IDE_VERSION_CODE: ${TRAE_IDE_VERSION_CODE:-20260919}
+      RELAY_LISTEN: "0.0.0.0:8317"
     volumes:
       - relay-data:/data
     restart: unless-stopped
