@@ -143,3 +143,15 @@
 - `TestExpiredTokenMapsTo401`：HTTP 401 且刷新失败时返回 `401 authentication_error`，message 为上游原文。
 - `TestStreamAuthErrorRefreshesOnce`：流内 code 1001 触发刷新并重试一次，第二次请求使用新 token 成功，新 token 落盘。
 - `TestFirstEventTimeoutIsReported`：上游 100 毫秒内无事件时返回 `502 upstream_first_event_timeout`。
+
+## 多账号池验证
+
+启用多个账号时不再只用第一个账号：`pick` 按轮询（或 `RELAY_ACCOUNT_SELECT=credits` 时按最近余额降序）选择可用账号，每个账号受 `RELAY_MAX_CONCURRENT` 限制，全部占满或仍在 `RELAY_ACCOUNT_MIN_INTERVAL_MS` 间隔内时最多排队 `RELAY_ACCOUNT_QUEUE_MS`（默认 30 秒），超时返回 `503 account_concurrency_limit`，无启用账号返回 `503 no_enabled_account`。`/v1/models` 合并所有启用账号目录，后台目录刷新也遍历全部启用账号。
+
+新增 3 项离线测试，当次完整套件为 **26 项**，`go test -race ./...` 全部通过且无数据竞争报告；`gofmt -l .` 无输出、`go vet ./...` 与原生构建通过。
+
+- `TestPoolRoundRobinAndQueue`：两个账号轮流选中；都占满时等待约 50 毫秒才报 busy；释放后立即可用；排除名单生效。
+- `TestPoolCreditOrderAndMinInterval`：余额 900 / 10 / 未知按降序选中；最小间隔内第二轮换到另一账号。
+- `TestModelsMergeAcrossAccounts`：`/v1/models` 同时返回两个账号各自独有的模型。
+
+未验证边界：真实多账号的上游并发与限流表现未实测（本地实例只有一个 Trae 账号），排队与选择逻辑仅由离线夹具覆盖。

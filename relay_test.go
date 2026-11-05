@@ -344,10 +344,11 @@ func TestCancellationAndConcurrency(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("handler stuck")
 	}
-	if !a.acquire("acc") {
+	acc, e := a.pick(context.Background(), nil)
+	if e != nil {
 		t.Fatal("slot leaked")
 	}
-	a.release("acc")
+	a.release(acc.ID)
 }
 func TestPKCEDeviceSignatureAndCallbackBinding(t *testing.T) {
 	a := testApp(t)
@@ -661,6 +662,86 @@ func TestFirstEventTimeoutIsReported(t *testing.T) {
 	})
 	w := request(a, "POST", "/v1/chat/completions", chatBody(false), a.store.apiKey(), nil)
 	if w.Code != 502 || !strings.Contains(w.Body.String(), "upstream_first_event_timeout") {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+}
+
+func addAccount(t *testing.T, a *App, id string, balance M, models []Model) {
+	t.Helper()
+	if e := a.store.putAccount(Account{ID: id, Name: id, Enabled: true, Scope: "trae", Token: "TOKEN_" + id, RefreshToken: "REFRESH_" + id, UserID: "uid", MachineID: "machine", DeviceID: "device", Balance: balance}); e != nil {
+		t.Fatal(e)
+	}
+	a.models[id] = cachedModels{models, time.Now()}
+}
+func poolModels(ids ...string) []Model {
+	out := []Model{}
+	for _, id := range ids {
+		out = append(out, Model{ID: id, ModelName: id + "__dev", Function: "chat_v3", Source: 1})
+	}
+	return out
+}
+func TestPoolRoundRobinAndQueue(t *testing.T) {
+	a := testAppConfig(t, Config{Concurrency: 1, QueueTimeout: 50 * time.Millisecond})
+	addAccount(t, a, "acc1", nil, poolModels("m1"))
+	addAccount(t, a, "acc2", nil, poolModels("m1"))
+	first, e := a.pick(context.Background(), nil)
+	if e != nil || first.ID != "acc1" {
+		t.Fatalf("first %v %v", first.ID, e)
+	}
+	second, e := a.pick(context.Background(), nil)
+	if e != nil || second.ID != "acc2" {
+		t.Fatalf("second %v %v", second.ID, e)
+	}
+	start := time.Now()
+	if _, e = a.pick(context.Background(), nil); e != errPoolBusy {
+		t.Fatalf("expected busy, got %v", e)
+	}
+	if elapsed := time.Since(start); elapsed < 40*time.Millisecond {
+		t.Fatalf("no queueing wait: %v", elapsed)
+	}
+	a.release("acc1")
+	if third, e := a.pick(context.Background(), nil); e != nil || third.ID != "acc1" {
+		t.Fatalf("third %v %v", third.ID, e)
+	}
+	a.release("acc2")
+	a.release("acc1")
+	if _, e := a.pick(context.Background(), map[string]bool{"acc1": true}); e != nil {
+		t.Fatalf("exclude failed: %v", e)
+	}
+}
+func TestPoolCreditOrderAndMinInterval(t *testing.T) {
+	a := testAppConfig(t, Config{Concurrency: 1, SelectByCredits: true})
+	addAccount(t, a, "low", M{"remaining": 10.0}, poolModels("m1"))
+	addAccount(t, a, "high", M{"remaining": 900.0}, poolModels("m1"))
+	addAccount(t, a, "unknown", nil, poolModels("m1"))
+	for _, want := range []string{"high", "low", "unknown"} {
+		acc, e := a.pick(context.Background(), nil)
+		if e != nil || acc.ID != want {
+			t.Fatalf("expected %s got %v %v", want, acc.ID, e)
+		}
+	}
+	a = testAppConfig(t, Config{Concurrency: 2, MinInterval: 200 * time.Millisecond})
+	addAccount(t, a, "acc1", nil, poolModels("m1"))
+	addAccount(t, a, "acc2", nil, poolModels("m1"))
+	first, _ := a.pick(context.Background(), nil)
+	a.release(first.ID)
+	second, e := a.pick(context.Background(), nil)
+	if e != nil || second.ID == first.ID {
+		t.Fatalf("min interval ignored: %v %v", second.ID, e)
+	}
+}
+func TestModelsMergeAcrossAccounts(t *testing.T) {
+	a := testApp(t)
+	addAccount(t, a, "acc1", nil, poolModels("only-a"))
+	addAccount(t, a, "acc2", nil, poolModels("only-b"))
+	w := request(a, "GET", "/v1/models", nil, a.store.apiKey(), nil)
+	var out struct{ Data []M }
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	ids := map[string]bool{}
+	for _, m := range out.Data {
+		ids[str(m, "id")] = true
+	}
+	if w.Code != 200 || !ids["only-a"] || !ids["only-b"] {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
 }

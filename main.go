@@ -28,6 +28,9 @@ type Config struct {
 	Concurrency                                                   int
 	Timeout                                                       time.Duration
 	FirstEvent                                                    time.Duration
+	QueueTimeout                                                  time.Duration
+	MinInterval                                                   time.Duration
+	SelectByCredits                                               bool
 	SecureCookie                                                  bool
 }
 type cachedModels struct {
@@ -45,6 +48,8 @@ type App struct {
 	mu            sync.Mutex
 	refreshMu     sync.Mutex
 	busy          map[string]int
+	lastUsed      map[string]time.Time
+	cursor        int
 	models        map[string]cachedModels
 	sessions      map[string]Session
 	logins        map[string]*LoginAttempt
@@ -71,8 +76,14 @@ func newApp(cfg Config) (*App, error) {
 	if cfg.FirstEvent <= 0 {
 		cfg.FirstEvent = 120 * time.Second
 	}
+	if cfg.QueueTimeout < 0 || cfg.QueueTimeout > 5*time.Minute {
+		cfg.QueueTimeout = 30 * time.Second
+	}
+	if cfg.MinInterval < 0 || cfg.MinInterval > time.Minute {
+		cfg.MinInterval = 0
+	}
 	tr := &http.Transport{Proxy: http.ProxyFromEnvironment, DialContext: (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext, TLSHandshakeTimeout: 15 * time.Second, ResponseHeaderTimeout: 45 * time.Second, MaxIdleConns: 32, MaxIdleConnsPerHost: 8, MaxConnsPerHost: 16, IdleConnTimeout: 90 * time.Second}
-	return &App{cfg: cfg, store: s, client: &http.Client{Transport: tr, Timeout: cfg.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, busy: map[string]int{}, models: map[string]cachedModels{}, sessions: map[string]Session{}, logins: map[string]*LoginAttempt{}, adminSessions: map[string]time.Time{}, loginGate: make(chan struct{}, 2), requests: make(chan struct{}, 64), root: context.Background()}, nil
+	return &App{cfg: cfg, store: s, client: &http.Client{Transport: tr, Timeout: cfg.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, busy: map[string]int{}, lastUsed: map[string]time.Time{}, models: map[string]cachedModels{}, sessions: map[string]Session{}, logins: map[string]*LoginAttempt{}, adminSessions: map[string]time.Time{}, loginGate: make(chan struct{}, 2), requests: make(chan struct{}, 64), root: context.Background()}, nil
 }
 func equal(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -165,13 +176,19 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/v1/status" && r.Method == "GET":
 		a.status(w)
 	case r.URL.Path == "/v1/models" && r.Method == "GET":
-		acc, ok := a.store.active()
+		accounts, ok := a.store.enabled()
 		if !ok {
 			fail(w, 503, "no_enabled_account")
 			return
 		}
-		models, e := a.getModels(r.Context(), acc, false)
-		if e != nil {
+		all := []Model{}
+		for _, acc := range accounts {
+			if cached, e := a.getModels(r.Context(), acc, false); e == nil {
+				all = append(all, cached...)
+			}
+		}
+		models := mergeModels(all)
+		if len(models) == 0 {
 			fail(w, 502, "model_catalog_unavailable")
 			return
 		}
@@ -201,24 +218,26 @@ func (a *App) status(w http.ResponseWriter) {
 	for _, v := range a.busy {
 		n += v
 	}
+	perAccount := M{}
+	for id, v := range a.busy {
+		perAccount[id] = v
+	}
 	a.mu.Unlock()
-	_, ok := a.store.active()
-	writeJSON(w, 200, M{"status": "ok", "active_account": ok, "in_flight": n, "max_concurrent_per_account": a.cfg.Concurrency})
+	accounts, ok := a.store.enabled()
+	for _, acc := range accounts {
+		if _, seen := perAccount[acc.ID]; !seen {
+			perAccount[acc.ID] = 0
+		}
+	}
+	writeJSON(w, 200, M{"status": "ok", "active_account": ok, "accounts": len(accounts), "in_flight": n, "max_concurrent_per_account": a.cfg.Concurrency, "per_account": perAccount})
 }
-func (a *App) acquire(id string) bool {
+func (a *App) release(id string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	current, ok := a.store.active()
-	if !ok || current.ID != id {
-		return false
+	if a.busy[id] > 0 {
+		a.busy[id]--
 	}
-	if a.busy[id] >= a.cfg.Concurrency {
-		return false
-	}
-	a.busy[id]++
-	return true
 }
-func (a *App) release(id string) { a.mu.Lock(); defer a.mu.Unlock(); a.busy[id]-- }
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "keygen" {
 		fmt.Println(base64Key())
@@ -240,11 +259,23 @@ func main() {
 	if n < 1 || n > 8 {
 		log.Fatal("RELAY_MAX_CONCURRENT must be 1..8")
 	}
+	queue, _ := strconv.Atoi(env("RELAY_ACCOUNT_QUEUE_MS", "30000"))
+	if queue < 0 || queue > 300000 {
+		log.Fatal("RELAY_ACCOUNT_QUEUE_MS must be 0..300000")
+	}
+	gap, _ := strconv.Atoi(env("RELAY_ACCOUNT_MIN_INTERVAL_MS", "0"))
+	if gap < 0 || gap > 60000 {
+		log.Fatal("RELAY_ACCOUNT_MIN_INTERVAL_MS must be 0..60000")
+	}
+	credits := env("RELAY_ACCOUNT_SELECT", "round_robin")
+	if credits != "round_robin" && credits != "credits" {
+		log.Fatal("RELAY_ACCOUNT_SELECT must be round_robin or credits")
+	}
 	first, _ := strconv.Atoi(env("RELAY_FIRST_EVENT_TIMEOUT_SEC", "120"))
 	if first < 1 || first > 3600 {
 		log.Fatal("RELAY_FIRST_EVENT_TIMEOUT_SEC must be 1..3600")
 	}
-	cfg := Config{Addr: env("RELAY_LISTEN", "0.0.0.0:"+env("PORT", "8317")), DataDir: env("RELAY_DATA_DIR", "data"), AdminPassword: os.Getenv("RELAY_ADMIN_PASSWORD"), MasterKey: os.Getenv("RELAY_MASTER_KEY"), Version: env("TRAE_IDE_VERSION", "3.4.0"), VersionCode: env("TRAE_IDE_VERSION_CODE", "20260919"), Concurrency: n, Timeout: 180 * time.Second, FirstEvent: time.Duration(first) * time.Second}
+	cfg := Config{Addr: env("RELAY_LISTEN", "0.0.0.0:"+env("PORT", "8317")), DataDir: env("RELAY_DATA_DIR", "data"), AdminPassword: os.Getenv("RELAY_ADMIN_PASSWORD"), MasterKey: os.Getenv("RELAY_MASTER_KEY"), Version: env("TRAE_IDE_VERSION", "3.4.0"), VersionCode: env("TRAE_IDE_VERSION_CODE", "20260919"), Concurrency: n, Timeout: 180 * time.Second, FirstEvent: time.Duration(first) * time.Second, QueueTimeout: time.Duration(queue) * time.Millisecond, MinInterval: time.Duration(gap) * time.Millisecond, SelectByCredits: credits == "credits"}
 	cfg.SecureCookie = env("RELAY_SECURE_COOKIE", "false") == "true"
 	a, e := newApp(cfg)
 	if e != nil {

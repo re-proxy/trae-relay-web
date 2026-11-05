@@ -482,13 +482,13 @@ func (a *App) chat(w http.ResponseWriter, r *http.Request, responses bool) {
 		fail(w, 400, "messages_required")
 		return
 	}
-	acc, ok := a.store.active()
-	if !ok {
-		fail(w, 503, "no_enabled_account")
-		return
-	}
-	if !a.acquire(acc.ID) {
-		fail(w, 503, "account_concurrency_limit")
+	acc, e := a.pick(r.Context(), nil)
+	if e != nil {
+		if e == errNoAccount {
+			fail(w, 503, "no_enabled_account")
+		} else {
+			fail(w, 503, "account_concurrency_limit")
+		}
 		return
 	}
 	defer a.release(acc.ID)

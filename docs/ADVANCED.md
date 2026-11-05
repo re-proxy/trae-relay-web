@@ -43,6 +43,8 @@ curl http://127.0.0.1:8317/v1/responses \
 - `stop` 最多四条、每条 1024 字节，本地处理跨片段与 UTF-8 边界，仅截断正文，上游仍读到完成以获取用量，可能继续消耗额度。
 - Responses 会话缓存按账号隔离，最近 64 条，单条历史上限 4 MiB，**只在内存保留**，重启或淘汰后返回 `previous_response_not_found`。`store:false` 不缓存。此版本没有原 Windows 可选的会话持久化，也没有 GET / DELETE / cancel Responses 接口。
 - 用量只使用上游报告的 Token；个人缓存用量为 0 时，有限重试查询 `get_session_usage`，仅在 session 和输入/输出总量完全匹配时回填缓存。查询失败不影响生成结果。使用记录不保存消息正文。
+- 多个启用账号组成账号池：默认按轮询选择，`RELAY_ACCOUNT_SELECT=credits` 时按最近余额降序；每个账号受 `RELAY_MAX_CONCURRENT` 限制，都满（或在最小间隔内）时最多排队 `RELAY_ACCOUNT_QUEUE_MS`，超时才返回 `503 account_concurrency_limit`。没有启用账号返回 `503 no_enabled_account`。
+- `/v1/models` 合并所有启用账号的目录（按 id 去重），单个账号目录拉取失败不影响其他账号；生成请求使用所选账号自己的目录解析模型。
 - 不实现严格 JSON Schema、采样参数、seed、n、max_tokens / max_output_tokens 控制，以及 hosted web/file search、code interpreter、Files/PDF、音频、Embeddings、Images、Realtime、Batch。`background:true` 和不支持的内容/工具类型会被拒绝；其余部分未知参数会被忽略。需要严格 OpenAI 语义的客户端请先验证。
 - 不支持国际版、企业 VPC / 私有部署。此版本支持手动个人积分查询和企业套餐额度查询，尚未移植自动签到、费率及实际消费金额统计；企业消费请在官方控制台查看。没有 Windows 自动发现、DPAPI、托盘和自启动。
 
@@ -56,7 +58,10 @@ HTTPS 反向代理部署时，添加 `RELAY_SECURE_COOKIE=true`，代理保留 H
 | --- | --- |
 | `RELAY_MASTER_KEY` | 必填，32 随机字节的标准 Base64 |
 | `RELAY_ADMIN_PASSWORD` | 必填，不能为空，建议随机 32 字节 |
-| `RELAY_MAX_CONCURRENT` | 2，允许 1–8，每启用账号即时拒绝超限请求 |
+| `RELAY_MAX_CONCURRENT` | 2，允许 1–8，每个账号同时进行的生成请求上限 |
+| `RELAY_ACCOUNT_QUEUE_MS` | 30000，允许 0–300000；所有账号都占满时最多排队这么久，超时返回 `503 account_concurrency_limit` |
+| `RELAY_ACCOUNT_MIN_INTERVAL_MS` | 0，允许 0–60000；同一账号两次请求的最小间隔，用于避让上游限流 |
+| `RELAY_ACCOUNT_SELECT` | `round_robin`（默认）或 `credits`；后者优先使用最近一次余额查询剩余积分更高的账号 |
 | `RELAY_FIRST_EVENT_TIMEOUT_SEC` | 120，允许 1–3600；上游接受请求后迟迟不发首个事件时按 `upstream_first_event_timeout` 失败 |
 | `RELAY_SECURE_COOKIE` | false，HTTPS 反向代理部署设 true |
 | `RELAY_DATA_DIR` | 本地 `data`，镜像 `/data` |

@@ -252,10 +252,15 @@ func (a *App) catalogWorker(ctx context.Context) {
 		case <-timer.C:
 		}
 		delay = 5 * time.Minute
-		if acc, ok := a.store.active(); ok {
-			if _, e := a.getModels(ctx, acc, false); e == nil {
-				delay = time.Hour
+		accounts, _ := a.store.enabled()
+		ok := len(accounts) > 0
+		for _, acc := range accounts {
+			if _, e := a.getModels(ctx, acc, false); e != nil {
+				ok = false
 			}
+		}
+		if ok {
+			delay = time.Hour
 		}
 	}
 }

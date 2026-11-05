@@ -189,6 +189,19 @@ func (s *Store) active() (Account, bool) {
 	}
 	return Account{}, false
 }
+
+// enabled returns a copy of the enabled accounts plus whether any exist.
+func (s *Store) enabled() ([]Account, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []Account{}
+	for _, a := range s.state.Accounts {
+		if a.Enabled {
+			out = append(out, a)
+		}
+	}
+	return out, len(out) > 0
+}
 func (s *Store) apiKey() string { s.mu.Lock(); defer s.mu.Unlock(); return s.state.APIKey }
 func (s *Store) setting(id string) ModelSetting {
 	s.mu.Lock()

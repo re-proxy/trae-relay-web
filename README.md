@@ -109,7 +109,7 @@ docker compose up -d --build
 | API 返回 429 | 上游账号限流（code 4011 等），等待后重试或改用其他账号；本项目不重试限流请求 |
 | API 返回 403 | 上游额度不足（code 1005），在官方控制台确认套餐或积分 |
 | API 返回 502 | 上游失败且无可用状态码，看响应里的 code：`upstream_first_event_timeout` 表示上游迟迟未开始输出 |
-| API 返回 503 | 确认已启用账号、模型目录已刷新，且未达到账号并发上限 |
+| API 返回 503 | `no_enabled_account` 表示没有启用账号；`account_concurrency_limit` 表示所有账号并发已满且排队超时，可提高 `RELAY_MAX_CONCURRENT` 或 `RELAY_ACCOUNT_QUEUE_MS` |
 | 修改 `.env` 后未生效 | 执行 `docker compose up -d --force-recreate` |
 | 想改宿主端口 | 直接编辑 Compose 的 `ports`，例如 `0.0.0.0:9000:8317`，客户端相应使用 9000 |
 | HTTPS 反向代理或模型高级设置 | 查看 [高级配置与兼容说明](docs/ADVANCED.md) |
@@ -118,7 +118,7 @@ docker compose up -d --build
 
 仅支持国内个人与公共 SaaS 企业账号。支持手动查询个人剩余积分；暂未移植自动签到；不支持国际版、企业私有部署，以及严格 JSON Schema、托管搜索、音频等接口。Responses 会话仅在内存缓存，重启后需要重新传入历史。完整范围见 [API 与高级说明](docs/ADVANCED.md)。
 
-Windows 与 WSL Ubuntu 的构建、23 项离线测试及 race 检查、无凭据启动、SIGTERM 和重启恢复已验证。**Docker 镜像运行与真实账号的登录、刷新、生成尚未实测**，详见 [验证记录](VALIDATION.md)。
+Windows 与 WSL Ubuntu 的构建、26 项离线测试及 race 检查、无凭据启动、SIGTERM 和重启恢复已验证。**Docker 镜像运行与真实账号的登录、刷新、生成尚未实测**，详见 [验证记录](VALIDATION.md)。
 
 ## 原项目与致谢
 
