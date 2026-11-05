@@ -31,6 +31,9 @@ type Config struct {
 	QueueTimeout                                                  time.Duration
 	MinInterval                                                   time.Duration
 	SelectByCredits                                               bool
+	CheckinEnabled                                                bool
+	CheckinHour                                                   int
+	CheckinMinute                                                 int
 	SecureCookie                                                  bool
 }
 type cachedModels struct {
@@ -275,7 +278,16 @@ func main() {
 	if first < 1 || first > 3600 {
 		log.Fatal("RELAY_FIRST_EVENT_TIMEOUT_SEC must be 1..3600")
 	}
-	cfg := Config{Addr: env("RELAY_LISTEN", "0.0.0.0:"+env("PORT", "8317")), DataDir: env("RELAY_DATA_DIR", "data"), AdminPassword: os.Getenv("RELAY_ADMIN_PASSWORD"), MasterKey: os.Getenv("RELAY_MASTER_KEY"), Version: env("TRAE_IDE_VERSION", "3.4.0"), VersionCode: env("TRAE_IDE_VERSION_CODE", "20260919"), Concurrency: n, Timeout: 180 * time.Second, FirstEvent: time.Duration(first) * time.Second, QueueTimeout: time.Duration(queue) * time.Millisecond, MinInterval: time.Duration(gap) * time.Millisecond, SelectByCredits: credits == "credits"}
+	checkin := env("RELAY_CHECKIN_ENABLED", "true") == "true"
+	hour, _ := strconv.Atoi(env("RELAY_CHECKIN_HOUR", "10"))
+	if hour < 0 || hour > 23 {
+		log.Fatal("RELAY_CHECKIN_HOUR must be 0..23")
+	}
+	minute, _ := strconv.Atoi(env("RELAY_CHECKIN_MINUTE", "0"))
+	if minute < 0 || minute > 59 {
+		log.Fatal("RELAY_CHECKIN_MINUTE must be 0..59")
+	}
+	cfg := Config{Addr: env("RELAY_LISTEN", "0.0.0.0:"+env("PORT", "8317")), DataDir: env("RELAY_DATA_DIR", "data"), AdminPassword: os.Getenv("RELAY_ADMIN_PASSWORD"), MasterKey: os.Getenv("RELAY_MASTER_KEY"), Version: env("TRAE_IDE_VERSION", "3.4.0"), VersionCode: env("TRAE_IDE_VERSION_CODE", "20260919"), Concurrency: n, Timeout: 180 * time.Second, FirstEvent: time.Duration(first) * time.Second, QueueTimeout: time.Duration(queue) * time.Millisecond, MinInterval: time.Duration(gap) * time.Millisecond, SelectByCredits: credits == "credits", CheckinEnabled: checkin, CheckinHour: hour, CheckinMinute: minute}
 	cfg.SecureCookie = env("RELAY_SECURE_COOKIE", "false") == "true"
 	a, e := newApp(cfg)
 	if e != nil {
@@ -292,6 +304,7 @@ func main() {
 		_ = srv.Shutdown(c)
 	}()
 	go a.catalogWorker(ctx)
+	go a.checkinWorker(ctx)
 	log.Printf("Trae Relay Web listening on %s", cfg.Addr)
 	if e = srv.ListenAndServe(); e != nil && !errors.Is(e, http.ErrServerClosed) {
 		log.Fatal(e)

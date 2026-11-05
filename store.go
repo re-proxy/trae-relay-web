@@ -15,22 +15,26 @@ import (
 
 type M = map[string]any
 type Account struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Enabled      bool   `json:"enabled"`
-	Token        string `json:"token"`
-	RefreshToken string `json:"refresh_token"`
-	UserID       string `json:"user_id"`
-	Expiry       int64  `json:"expiry"`
-	Scope        string `json:"scope"`
-	TenantID     string `json:"tenant_id,omitempty"`
-	TenantName   string `json:"tenant_name,omitempty"`
-	MachineID    string `json:"machine_id"`
-	DeviceID     string `json:"device_id"`
-	PrivateKey   []byte `json:"private_key,omitempty"`
-	DeviceInfo   M      `json:"device_info,omitempty"`
-	Check        M      `json:"check,omitempty"`
-	Balance      M      `json:"balance,omitempty"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Enabled       bool   `json:"enabled"`
+	Token         string `json:"token"`
+	RefreshToken  string `json:"refresh_token"`
+	UserID        string `json:"user_id"`
+	Expiry        int64  `json:"expiry"`
+	Scope         string `json:"scope"`
+	TenantID      string `json:"tenant_id,omitempty"`
+	TenantName    string `json:"tenant_name,omitempty"`
+	MachineID     string `json:"machine_id"`
+	DeviceID      string `json:"device_id"`
+	PrivateKey    []byte `json:"private_key,omitempty"`
+	DeviceInfo    M      `json:"device_info,omitempty"`
+	Check         M      `json:"check,omitempty"`
+	Balance       M      `json:"balance,omitempty"`
+	CheckinDay    string `json:"checkin_day,omitempty"`
+	CheckinResult int    `json:"checkin_result,omitempty"`
+	CheckinAt     int64  `json:"checkin_retry_at,omitempty"`
+	CheckinOff    bool   `json:"checkin_off,omitempty"`
 }
 type APIKey struct {
 	ID      string    `json:"id"`
@@ -188,6 +192,55 @@ func (s *Store) active() (Account, bool) {
 		}
 	}
 	return Account{}, false
+}
+
+// all returns a copy of every saved account.
+func (s *Store) all() []Account {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Account{}, s.state.Accounts...)
+}
+
+// find returns one saved account by id.
+func (s *Store) find(id string) (Account, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, a := range s.state.Accounts {
+		if a.ID == id {
+			return a, true
+		}
+	}
+	return Account{}, false
+}
+
+// recordCheckin stores today's result; failures retry after fifteen minutes,
+// matching the reference relay's backoff.
+func (s *Store) recordCheckin(id, day string, result int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.state.Accounts {
+		if s.state.Accounts[i].ID != id {
+			continue
+		}
+		s.state.Accounts[i].CheckinDay = day
+		s.state.Accounts[i].CheckinResult = result
+		s.state.Accounts[i].CheckinAt = time.Now().Unix() + 900
+		break
+	}
+	return s.saveLocked()
+}
+
+// setCheckinOff toggles automatic check-in for one account.
+func (s *Store) setCheckinOff(id string, off bool) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.state.Accounts {
+		if s.state.Accounts[i].ID == id {
+			s.state.Accounts[i].CheckinOff = off
+			return true, s.saveLocked()
+		}
+	}
+	return false, nil
 }
 
 // enabled returns a copy of the enabled accounts plus whether any exist.

@@ -43,6 +43,7 @@ curl http://127.0.0.1:8317/v1/responses \
 - `stop` 最多四条、每条 1024 字节，本地处理跨片段与 UTF-8 边界，仅截断正文，上游仍读到完成以获取用量，可能继续消耗额度。
 - Responses 会话缓存按账号隔离，最近 64 条，单条历史上限 4 MiB，**只在内存保留**，重启或淘汰后返回 `previous_response_not_found`。`store:false` 不缓存。此版本没有原 Windows 可选的会话持久化，也没有 GET / DELETE / cancel Responses 接口。
 - 用量只使用上游报告的 Token；个人缓存用量为 0 时，有限重试查询 `get_session_usage`，仅在 session 和输入/输出总量完全匹配时回填缓存。查询失败不影响生成结果。使用记录不保存消息正文。
+- 每日签到仅适用于个人账号（企业 SaaS 不参与），默认自动开启：服务端本地时间达到 `RELAY_CHECKIN_HOUR:RELAY_CHECKIN_MINUTE` 后，为每个当天尚未完成的账号依次执行一次。流程与参考实现一致：先查 `checkin_credits/status`，未签到才调用 `checkin_credits/claim`，再用 `pay/ide_user_ent_usage` 的账户总额对比确认入账，最后刷新积分；签到请求的 `x-device-id` 使用由用户 ID 派生的稳定值（`sha256("TraeRelay-checkin-probe:"+userId)` 前 8 字节映射为 15 位数字），不使用网页登录的设备标识。领取失败后 15 分钟重试；已入账、今日已签到、账号拒绝（含上游 9095）和「已提交待确认」当天不再重复领取，避免重复调用 claim。claim 失败时会先复查 status，只有在确认已签到时才视为待确认，不盲目重放。
 - 多个启用账号组成账号池：默认按轮询选择，`RELAY_ACCOUNT_SELECT=credits` 时按最近余额降序；每个账号受 `RELAY_MAX_CONCURRENT` 限制，都满（或在最小间隔内）时最多排队 `RELAY_ACCOUNT_QUEUE_MS`，超时才返回 `503 account_concurrency_limit`。没有启用账号返回 `503 no_enabled_account`。
 - `/v1/models` 合并所有启用账号的目录（按 id 去重），单个账号目录拉取失败不影响其他账号；生成请求使用所选账号自己的目录解析模型。
 - 不实现严格 JSON Schema、采样参数、seed、n、max_tokens / max_output_tokens 控制，以及 hosted web/file search、code interpreter、Files/PDF、音频、Embeddings、Images、Realtime、Batch。`background:true` 和不支持的内容/工具类型会被拒绝；其余部分未知参数会被忽略。需要严格 OpenAI 语义的客户端请先验证。
@@ -62,6 +63,9 @@ HTTPS 反向代理部署时，添加 `RELAY_SECURE_COOKIE=true`，代理保留 H
 | `RELAY_ACCOUNT_QUEUE_MS` | 30000，允许 0–300000；所有账号都占满时最多排队这么久，超时返回 `503 account_concurrency_limit` |
 | `RELAY_ACCOUNT_MIN_INTERVAL_MS` | 0，允许 0–60000；同一账号两次请求的最小间隔，用于避让上游限流 |
 | `RELAY_ACCOUNT_SELECT` | `round_robin`（默认）或 `credits`；后者优先使用最近一次余额查询剩余积分更高的账号 |
+| `RELAY_CHECKIN_ENABLED` | `true`；是否开启个人账号每日自动签到 |
+| `RELAY_CHECKIN_HOUR` | 10，允许 0–23；服务端本地时间几点之后执行当天签到 |
+| `RELAY_CHECKIN_MINUTE` | 0，允许 0–59；与 `RELAY_CHECKIN_HOUR` 组成触发时刻 |
 | `RELAY_FIRST_EVENT_TIMEOUT_SEC` | 120，允许 1–3600；上游接受请求后迟迟不发首个事件时按 `upstream_first_event_timeout` 失败 |
 | `RELAY_SECURE_COOKIE` | false，HTTPS 反向代理部署设 true |
 | `RELAY_DATA_DIR` | 本地 `data`，镜像 `/data` |

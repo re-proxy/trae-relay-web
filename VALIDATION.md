@@ -163,3 +163,16 @@ Go 默认的 `User-Agent: Go-http-client/1.1` 会被上游当作非客户端流�
 新增测试 `TestUpstreamRequestIdentifiesDesktopClient` 断言上游收到该 UA，当次完整套件 27 项、`go test -race` 通过。
 
 真机验证：容器重建后 10.45:8317 对 `deepseek-v4.1-flash` 的流式与非流式请求均返回 200 与真实内容（此前稳定 `429 upstream_rate_limited`）。
+
+## 每日签到
+
+个人账号每日签到的请求序列、多键状态判定、稳定设备标识与重试策略均按参考实现迁移：
+
+- 稳定设备标识：`sha256("TraeRelay-checkin-probe:" + userId)` 前 8 字节大端转整数，映射为 `100000000000000 + v % 900000000000000`，只用于签到请求的 `x-device-id`，不改变网页登录的设备身份。
+- 状态判定支持 `checked_in` / `did_checked_in` / `already_checked_in` / `checkin_status` 等多种上游写法，`checked_in` 优先，避免 `did_checked_in=false` 覆盖已签到；上游 `code` 深层搜索，`9095` 视为账号级拒绝。
+- 领取后用 `pay/ide_user_ent_usage` 的账户总额前后对比确认入账，再刷新积分；claim 失败时先复查 status，确认已签到才记为待确认，不重放 claim。
+- 同一天内成功、已签到、账号拒绝、待确认都不再重复领取；失败则 15 分钟后重试；跨天重新执行。
+
+新增 6 项离线测试（稳定标识向量、状态解析、领取并确认、claim 失败不重放、签到使用稳定设备标识、due 规则），完整套件 **33 项**，`go test -race ./...` 通过，`gofmt`/`go vet` 干净。
+
+未验证：真实上游签到成功路径未在本次改动中实测（需要真实账号当日未签到）。
