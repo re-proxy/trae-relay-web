@@ -5,7 +5,8 @@ function notice(text){$('notice').textContent=text;$('notice').hidden=false;}
 async function api(path,body){const res=await fetch('/admin/'+path,{method:body===undefined?'GET':'POST',headers:body===undefined?{}:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),credentials:'same-origin'});const data=await res.json();if(!res.ok){if(res.status===401){$('console').hidden=true;$('login').hidden=false;$('logout').hidden=true;$('newKey').value='';$('callback').value='';$('authorization').hidden=true;attempt='';}throw Error(data.error?.message||'请求失败');}return data;}
 async function action(fn){try{await fn();}catch(e){notice(e.message);}}
 function button(text,fn){const b=el('button',text);b.onclick=()=>action(async()=>{b.disabled=true;try{await fn();}finally{b.disabled=false;}});return b;}
-async function refresh(){const s=await api('state');$('console').hidden=false;$('login').hidden=true;$('logout').hidden=false;$('accountCount').textContent=s.accounts.length;$('inflight').textContent=s.in_flight;$('modelCount').textContent=s.models.length;$('baseURL').textContent=location.origin+'/v1';$('keyCount').textContent=s.keys.length+' KEYS';
+function endpoint(){return location.origin+'/v1';}
+async function refresh(){const s=await api('state');$('console').hidden=false;$('login').hidden=true;$('logout').hidden=false;$('accountCount').textContent=s.accounts.length;$('inflight').textContent=s.in_flight;$('modelCount').textContent=s.models.length;$('baseURL').textContent=endpoint();$('keyCount').textContent=s.keys.length+' KEYS';
 const accounts=$('accountList');accounts.replaceChildren();if(!s.accounts.length)accounts.append(el('p','还没有账号。添加账号并完成官方授权后，在此启用。'));
 for(const a of s.accounts){
 const card=el('article',undefined,'accountCard'),head=el('div',undefined,'accountHead'),identity=el('div'),avatar=el('span',a.name.slice(0,1).toUpperCase(),'avatar'),title=el('div');title.append(el('strong',a.name),el('small',a.scope==='saas'?'企业 SaaS · '+a.tenant_name:'TRAE CN / 个人账号'));identity.className='identity';identity.append(avatar,title);head.append(identity,el('span',a.enabled?'当前启用':'未启用',a.enabled?'pill active':'pill'));card.append(head);
@@ -22,4 +23,7 @@ $('startLogin').onclick=()=>action(async()=>{const p=await api('login/start',{})
 $('completeForm').onsubmit=e=>{e.preventDefault();action(async()=>{const callback=$('callback').value;$('callback').value='';await api('login/complete',{id:attempt,callback,name:$('accountName').value});attempt='';$('authorization').hidden=true;notice('授权已保存，请启用账号并刷新模型目录');await refresh();});};
 $('refreshModels').onclick=()=>action(async()=>{notice('正在请求上游模型目录…');await api('models/refresh',{});notice('模型目录已更新');await refresh();});
 $('keyForm').onsubmit=e=>{e.preventDefault();action(async()=>{const button=$('keyForm').querySelector('button');button.disabled=true;try{const result=await api('key',{action:'create',name:$('keyName').value});$('newKey').value=result.api_key;$('newKeyBox').hidden=false;$('keyName').value='';await refresh();}finally{button.disabled=false;}});};$('hideKey').onclick=()=>{$('newKey').value='';$('newKeyBox').hidden=true;};
+$('footerURL').textContent=endpoint().replace(/\/v1$/,'');
+$('footerURL').title=location.origin;
+$('baseURL').onclick=async()=>{try{await navigator.clipboard.writeText(endpoint());notice('BASE URL 已复制：'+endpoint());}catch{notice('复制失败，请手动选择 BASE URL');}};
 refresh().catch(()=>{});
