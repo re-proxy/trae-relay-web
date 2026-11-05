@@ -1,0 +1,12 @@
+{
+  "health": 200,
+  "unauthenticated_api_and_admin": 401,
+  "admin_login_and_empty_state": "passed",
+  "no_account_models_chat_responses": 503,
+  "embedded_web_ui": 200,
+  "healthcheck_exit": 0,
+  "sigterm_exit": 0,
+  "encrypted_api_key_after_restart": 200,
+  "no_plaintext_secrets_in_state": "passed",
+  "restart_sigterm_exit": 0
+}

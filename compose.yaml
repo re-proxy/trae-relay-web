@@ -1,0 +1,27 @@
+services:
+  relay:
+    build: .
+    ports:
+      - "127.0.0.1:${RELAY_PORT:-8317}:8317"
+    environment:
+      RELAY_ADMIN_PASSWORD: ${RELAY_ADMIN_PASSWORD:?set RELAY_ADMIN_PASSWORD in .env}
+      RELAY_MASTER_KEY: ${RELAY_MASTER_KEY:?set RELAY_MASTER_KEY in .env}
+      RELAY_MAX_CONCURRENT: ${RELAY_MAX_CONCURRENT:-2}
+      RELAY_SECURE_COOKIE: ${RELAY_SECURE_COOKIE:-false}
+      TRAE_IDE_VERSION: ${TRAE_IDE_VERSION:-3.4.0}
+      TRAE_IDE_VERSION_CODE: ${TRAE_IDE_VERSION_CODE:-20260919}
+    volumes:
+      - relay-data:/data
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    stop_grace_period: 20s
+volumes:
+  relay-data:
