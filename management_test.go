@@ -171,3 +171,21 @@ func TestEnterpriseQuotaIsNotRemainingBalance(t *testing.T) {
 		t.Fatal(result, e)
 	}
 }
+
+func TestAdminPasswordOnlyRequiresNonEmpty(t *testing.T) {
+	cfg := Config{AdminPassword: "a", MasterKey: base64Key(), DataDir: t.TempDir(), Concurrency: 2, Timeout: 5 * time.Second, Version: "3.4.0", VersionCode: "20260919"}
+	a, e := newApp(cfg)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if w := request(a, "POST", "/admin/login", M{"password": "a"}, "", nil); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w := request(a, "POST", "/admin/login", M{"password": "b"}, "", nil); w.Code != 401 {
+		t.Fatal(w.Code)
+	}
+	cfg.AdminPassword = ""
+	if _, e := newApp(cfg); e == nil {
+		t.Fatal("empty admin password must be rejected")
+	}
+}

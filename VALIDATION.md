@@ -114,7 +114,7 @@
 
 ## 账号诊断、多密钥、余额与 UI 更新
 
-新增 4 项离线测试，完整套件现为 **18 项**；WSL `go test -race -v ./...` 全部通过、无数据竞争报告，Windows `go vet`、Windows/Linux 原生构建及 JavaScript 语法检查通过。
+新增 4 项离线测试，当次完整套件为 **18 项**；WSL `go test -race -v ./...` 全部通过、无数据竞争报告，Windows `go vet`、Windows/Linux 原生构建及 JavaScript 语法检查通过。
 
 - `TestMultipleKeysMigrationAndRevocation`：新增密钥与旧密钥并存、独立启停/重命名/撤销、加密重启恢复、列表不返回完整密钥、API 与管理权限隔离。
 - `TestPersonalBalanceAndMetadataCheck`：验证官方身份和两类目录，不访问生成接口；个人 `ide_user_ent_usage` 请求和权威积分口径；诊断与余额持久化。
@@ -124,3 +124,11 @@
 实际浏览器使用本机无账号临时实例验收了管理登录、新概览和密钥列表，见 [界面](docs/management.png) 与 [密钥管理](docs/keys.png)。账号卡片上的诊断和余额功能使用离线 HTTP 夹具验证，没有使用真实账号或消耗额度。
 
 新数据兼容旧加密状态，原 API Key 保留可用。余额手动查询，不自动产生后台查询；企业金额计费不可用时展示官方控制台入口。真实账号与 Docker 的未验证边界保持不变。
+
+## 管理密码长度要求移除验证
+
+管理页登录密码不再要求最少 16 字符：`newApp` 只拒绝空密码，其他长度均可启动并登录；`scripts/init-env.sh` 仍生成 32 字节随机密码。
+
+- `TestAdminPasswordOnlyRequiresNonEmpty`：单字符密码启动并登录成功，错误密码返回 401，空密码拒绝启动。
+- `go vet ./...` 通过；`go test -race ./...` **19 项全部通过，无数据竞争报告**。
+- Docker 容器运行与真实 Trae 账号的未验证边界保持不变。

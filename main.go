@@ -60,8 +60,8 @@ func env(k, d string) string {
 	return d
 }
 func newApp(cfg Config) (*App, error) {
-	if len(cfg.AdminPassword) < 16 {
-		return nil, errors.New("RELAY_ADMIN_PASSWORD must contain at least 16 characters")
+	if cfg.AdminPassword == "" {
+		return nil, errors.New("RELAY_ADMIN_PASSWORD must not be empty")
 	}
 	s, e := openStore(cfg.DataDir, cfg.MasterKey)
 	if e != nil {

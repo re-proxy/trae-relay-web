@@ -32,7 +32,7 @@ sh scripts/init-env.sh
 
 打开 `.env` 查看管理密码并妥善保存。脚本不会覆盖已存在的 `.env`；升级时跳过此步骤，继续使用原文件。
 
-没有 OpenSSL 或使用 NAS 文件管理器时，也可把 `.env.example` 复制为 `.env` 后手动填写：管理密码至少 16 个字符；主密钥必须是 **32 随机字节的标准 Base64**。可使用容器内置命令生成主密钥，无需在宿主机安装工具：
+没有 OpenSSL 或使用 NAS 文件管理器时，也可把 `.env.example` 复制为 `.env` 后手动填写：管理密码不能为空，建议使用随机长密码；主密钥必须是 **32 随机字节的标准 Base64**。可使用容器内置命令生成主密钥，无需在宿主机安装工具：
 
 ```sh
 cp .env.example .env
@@ -115,7 +115,7 @@ docker compose up -d --build
 
 仅支持国内个人与公共 SaaS 企业账号。支持手动查询个人剩余积分；暂未移植自动签到；不支持国际版、企业私有部署，以及严格 JSON Schema、托管搜索、音频等接口。Responses 会话仅在内存缓存，重启后需要重新传入历史。完整范围见 [API 与高级说明](docs/ADVANCED.md)。
 
-Windows 与 WSL Ubuntu 的构建、18 项离线测试及 race 检查、无凭据启动、SIGTERM 和重启恢复已验证。**Docker 镜像运行与真实账号的登录、刷新、生成尚未实测**，详见 [验证记录](VALIDATION.md)。
+Windows 与 WSL Ubuntu 的构建、19 项离线测试及 race 检查、无凭据启动、SIGTERM 和重启恢复已验证。**Docker 镜像运行与真实账号的登录、刷新、生成尚未实测**，详见 [验证记录](VALIDATION.md)。
 
 ## 原项目与致谢
 

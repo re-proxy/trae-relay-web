@@ -54,7 +54,7 @@ HTTPS 反向代理部署时，添加 `RELAY_SECURE_COOKIE=true`，代理保留 H
 | 环境变量 | 默认 / 要求 |
 | --- | --- |
 | `RELAY_MASTER_KEY` | 必填，32 随机字节的标准 Base64 |
-| `RELAY_ADMIN_PASSWORD` | 必填，至少 16 字符，建议随机 32 字节 |
+| `RELAY_ADMIN_PASSWORD` | 必填，不能为空，建议随机 32 字节 |
 | `RELAY_MAX_CONCURRENT` | 2，允许 1–8，每启用账号即时拒绝超限请求 |
 | `RELAY_SECURE_COOKIE` | false，HTTPS 反向代理部署设 true |
 | `RELAY_DATA_DIR` | 本地 `data`，镜像 `/data` |
