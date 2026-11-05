@@ -132,3 +132,14 @@
 - `TestAdminPasswordOnlyRequiresNonEmpty`：单字符密码启动并登录成功，错误密码返回 401，空密码拒绝启动。
 - `go vet ./...` 通过；`go test -race ./...` **19 项全部通过，无数据竞争报告**。
 - Docker 容器运行与真实 Trae 账号的未验证边界保持不变。
+
+## 上游错误语义与重试补全验证
+
+生成失败不再统一折叠为 `502 upstream_request_failed`：`upstreamFailure` 按上游状态与错误码映射为 401 / 403 / 429 / 400 / 502，响应保留脱敏 `code` 与上游 `message`，并写一行不含凭据的运行日志。流内 `error` 事件 code 1001 与 HTTP 401 一样刷新凭据后重试一次，仅在尚未向客户端发出事件时重试；新增首事件超时（`RELAY_FIRST_EVENT_TIMEOUT_SEC`，默认 120 秒），超时报 `upstream_first_event_timeout`。
+
+新增 4 项离线测试，当次完整套件为 **23 项**，`go test -race ./...` 全部通过且无数据竞争报告；`gofmt -l .` 无输出、`go vet ./...` 通过、原生构建通过。
+
+- `TestUpstreamErrorsKeepStatusAndMessage`：code 4011 → 429 `rate_limit_error`、1005 → 403 `insufficient_quota`、4001 → 400 `invalid_request_error`，非流式与流式请求状态一致，错误帧带上游 message，且不输出 `[DONE]`。
+- `TestExpiredTokenMapsTo401`：HTTP 401 且刷新失败时返回 `401 authentication_error`，message 为上游原文。
+- `TestStreamAuthErrorRefreshesOnce`：流内 code 1001 触发刷新并重试一次，第二次请求使用新 token 成功，新 token 落盘。
+- `TestFirstEventTimeoutIsReported`：上游 100 毫秒内无事件时返回 `502 upstream_first_event_timeout`。

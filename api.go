@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -381,6 +382,33 @@ func (d *downstream) finish(result Result) error {
 	}
 	return e
 }
+
+// upstreamFailure maps an upstream failure to the downstream status and error
+// type so a throttled, expired or rejected call stays visible to the client.
+func upstreamFailure(e error) (int, string, string, string) {
+	status, kind, code, message := 502, "api_error", "upstream_request_failed", "Upstream request failed"
+	var u *UpstreamError
+	if !errors.As(e, &u) {
+		return status, kind, code, message
+	}
+	switch {
+	case u.Code == 1001 || u.Status == 401:
+		status, kind, code = 401, "authentication_error", "upstream_authentication_failed"
+	case u.Code == 1005:
+		status, kind, code = 403, "insufficient_quota", "upstream_insufficient_quota"
+	case u.Code == 429 || u.Code == 4008 || u.Code == 4011 || u.Status == 429:
+		status, kind, code = 429, "rate_limit_error", "upstream_rate_limited"
+	case u.Code == 4001:
+		status, kind, code = 400, "invalid_request_error", "upstream_invalid_request"
+	case u.Cause != "":
+		code = u.Cause
+	}
+	if u.Message != "" {
+		message = u.Message
+	}
+	return status, kind, code, message
+}
+
 func (a *App) chat(w http.ResponseWriter, r *http.Request, responses bool) {
 	var body M
 	if decode(w, r, &body) != nil {
@@ -621,12 +649,14 @@ func (a *App) chat(w http.ResponseWriter, r *http.Request, responses bool) {
 	}
 	_ = a.store.record(Usage{Time: time.Now(), Model: model.ID, Account: acc.ID, Tokens: result.Usage, Success: e == nil, DurationMS: time.Since(started).Milliseconds()})
 	if e != nil {
+		status, kind, code, message := upstreamFailure(e)
+		log.Printf("upstream failure model=%s account=%s status=%d code=%s message=%s", model.ID, acc.ID, status, code, message)
 		if !d.started {
-			fail(w, 502, "upstream_request_failed")
+			writeJSON(w, status, M{"error": M{"type": kind, "code": code, "message": message}})
 		} else if responses {
-			_ = d.event("response.failed", M{"response": M{"id": d.id, "object": "response", "status": "failed", "error": M{"code": "upstream_request_failed", "message": "Upstream request failed"}}})
+			_ = d.event("response.failed", M{"response": M{"id": d.id, "object": "response", "status": "failed", "error": M{"type": kind, "code": code, "message": message}}})
 		} else {
-			_ = d.send("", M{"error": M{"code": "upstream_request_failed", "message": "Upstream request failed"}})
+			_ = d.send("", M{"error": M{"type": kind, "code": code, "message": message}})
 		}
 	}
 }

@@ -36,7 +36,8 @@ curl http://127.0.0.1:8317/v1/responses \
 
 - 上游为 `/api/agent/v3/llm_utils_chat`，使用 `Cloud-IDE-JWT` / IDE 请求头。模型从 `/api/ide/v1/get_detail_param` 的 `chat_v3` 和 `solo_agent` 目录合并，过滤隐藏、自定义和内部模型，正常每小时刷新，失败每五分钟重试；管理页或请求可即时触发拉取。
 - `tools[].function.parameters` 从对象序列化为上游 JSON 字符串；工具历史改写为上游 `function_call`；按 index 拼接增量/快照参数，done 后输出完整调用。工具图片结果延迟补为标注来源的用户图片消息，保留连续工具结果的配对。
-- 正文和 reasoning 均为增量，不会误删重复片段。只在真正收到 `done` / `[DONE]` 后成功；提前断流发出错误，不输出虚假的完成事件。HTTP 401 握手失败只刷新重试一次，已经发出的事件不重放。
+- 正文和 reasoning 均为增量，不会误删重复片段。只在真正收到 `done` / `[DONE]` 后成功；提前断流发出错误，不输出虚假的完成事件。HTTP 401 握手失败或流内 error 事件 code 1001 都只刷新凭据重试一次，且仅当还没有任何事件发给客户端；刷新失败按 401 返回。
+- 上游失败保留语义：HTTP 401 / code 1001 → `401 authentication_error`，code 1005 → `403 insufficient_quota`，code 429 / 4008 / 4011 / HTTP 429 → `429 rate_limit_error`，code 4001 → `400 invalid_request_error`，其余 → `502 api_error`。响应同时给出脱敏 `code`（如 `upstream_rate_limited`）和上游原始 `message`，便于区分限流、额度与鉴权问题；已经发出事件后才失败时，改用错误帧 / `response.failed` 结束。
 - `reasoning_effort` / Responses `reasoning.effort` 仅取目录支持的值。管理页可设置模型别名、启用、默认思考档位和 Max；`is_max_mode`（数字或布尔）可按请求覆盖，使用目录的 `__max` 名称及最大上下文。
 - `tool_choice: none` 移除工具；命名 choice 筛选声明；`required` 和命名 choice 最终仍为上游 `auto`，与参考实现相同，**不保证强制调用**。自定义工具包装为 `{input: string}` 函数工具，不执行 grammar 约束。
 - `stop` 最多四条、每条 1024 字节，本地处理跨片段与 UTF-8 边界，仅截断正文，上游仍读到完成以获取用量，可能继续消耗额度。
@@ -56,6 +57,7 @@ HTTPS 反向代理部署时，添加 `RELAY_SECURE_COOKIE=true`，代理保留 H
 | `RELAY_MASTER_KEY` | 必填，32 随机字节的标准 Base64 |
 | `RELAY_ADMIN_PASSWORD` | 必填，不能为空，建议随机 32 字节 |
 | `RELAY_MAX_CONCURRENT` | 2，允许 1–8，每启用账号即时拒绝超限请求 |
+| `RELAY_FIRST_EVENT_TIMEOUT_SEC` | 120，允许 1–3600；上游接受请求后迟迟不发首个事件时按 `upstream_first_event_timeout` 失败 |
 | `RELAY_SECURE_COOKIE` | false，HTTPS 反向代理部署设 true |
 | `RELAY_DATA_DIR` | 本地 `data`，镜像 `/data` |
 | `RELAY_LISTEN` | `0.0.0.0:8317`，本地直接运行可设 `127.0.0.1:8317` |
@@ -67,9 +69,9 @@ IDE 版本头属于上游非公开兼容协议，本项目不自动探测或声�
 
 `state.enc` 包含账号凭据、API Key、模型设置和最近 500 条使用记录，整体采用 AES-256-GCM 加密；每次写入使用新随机 nonce，带版本 AAD，临时文件 fsync 后替换。主密钥来自部署环境，**不要与 volume 备份存放在同一位置**。备份和恢复必须同时保留原主密钥；密钥丢失无法恢复，加密文件损坏或密钥错误会拒绝启动。此版本不提供在线主密钥轮换。
 
-管理页不回传 token / refresh token / 私钥；上游身份查询返回的 Password 不保存。默认运行日志只记录启动和本地存储错误，不记录请求体、回调、账号 token 或上游原始错误正文。生成失败的具体类别通过脱敏错误码及使用记录呈现。
+管理页不回传 token / refresh token / 私钥；上游身份查询返回的 Password 不保存。运行日志只记录启动、本地存储错误和生成失败的状态、脱敏错误码与上游错误 message，不记录请求体、回调或账号 token。生成失败的具体类别通过 HTTP 状态、脱敏错误码及使用记录呈现。
 
-管理会话 12 小时，HttpOnly + SameSite=Strict；重启和退出后需重新登录。所有管理写操作要求 JSON，同源 Origin 检查。管理登录限流，最多 64 个会话、8 个待授权流程。服务最多 64 个活跃 API/管理请求；请求体 16 MiB、头部 32 KiB、上游单 SSE 事件 2 MiB、累计事件 48 MiB、文本输出 32 MiB、128 个工具调用。单请求 180 秒，连接与响应头独立超时，下游写入超时 30 秒。客户端断开会取消上游；收到 SIGTERM / Ctrl+C 后取消在途请求并优雅退出。
+管理会话 12 小时，HttpOnly + SameSite=Strict；重启和退出后需重新登录。所有管理写操作要求 JSON，同源 Origin 检查。管理登录限流，最多 64 个会话、8 个待授权流程。服务最多 64 个活跃 API/管理请求；请求体 16 MiB、头部 32 KiB、上游单 SSE 事件 2 MiB、累计事件 48 MiB、文本输出 32 MiB、128 个工具调用。单请求 180 秒，连接与响应头独立超时，首事件超时默认 120 秒，下游写入超时 30 秒。客户端断开会取消上游；收到 SIGTERM / Ctrl+C 后取消在途请求并优雅退出。
 
 账号变更会在有生成请求时返回 `409 requests_in_flight`。元数据请求与凭据刷新串行协调，避免删除账号后被刷新写回。单 volume 仅允许一个进程写入。
 

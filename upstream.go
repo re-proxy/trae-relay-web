@@ -5,12 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -251,8 +251,47 @@ func parseSSE(r io.Reader, handle func(string, string) error) error {
 
 var errStreamDone = errors.New("stream done")
 
+// UpstreamError keeps the upstream status and error payload so a throttled,
+// expired or rejected call stays distinguishable instead of collapsing into one
+// opaque relay failure.
+type UpstreamError struct {
+	Status  int    // upstream HTTP status; 0 when the failure arrived inside the stream
+	Code    int    // upstream error code from an SSE error event; 0 otherwise
+	Message string // upstream text when it supplied one
+	Cause   string // relay-side category such as upstream_first_event_timeout
+}
+
+func (e *UpstreamError) Error() string {
+	switch {
+	case e.Code != 0:
+		return "upstream_event_error_" + strconv.Itoa(e.Code)
+	case e.Status != 0:
+		return "upstream_http_" + strconv.Itoa(e.Status)
+	default:
+		return e.Cause
+	}
+}
+
+// upstreamText returns the start of a failure body, preferring its message field.
+func upstreamText(r io.Reader) string {
+	data, _ := io.ReadAll(io.LimitReader(r, 512))
+	var m M
+	if json.Unmarshal(data, &m) == nil {
+		if s := str(m, "message"); s != "" {
+			return s
+		}
+		if s := str(obj(m["error"]), "message"); s != "" {
+			return s
+		}
+	}
+	s := strings.TrimSpace(string(data))
+	if len(s) > 200 {
+		s = s[:200]
+	}
+	return s
+}
+
 func (a *App) runUpstream(ctx context.Context, acc Account, body M, sink func(Event) error) (Result, error) {
-	result := Result{Finish: "stop", Usage: M{}}
 	if acc.Scope == "saas" {
 		body["conversation_id"] = randomID()
 	}
@@ -260,54 +299,78 @@ func (a *App) runUpstream(ctx context.Context, acc Account, body M, sink func(Ev
 	if acc.Scope == "saas" {
 		host = enterpriseHost
 	}
-	payload, _ := json.Marshal(body)
-	var resp *http.Response
-	var e error
+	encoded, _ := json.Marshal(body)
 	for attempt := 0; attempt < 2; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, "POST", host+"/api/agent/v3/llm_utils_chat", strings.NewReader(string(payload)))
-		if err != nil {
-			return result, err
+		result, emitted, e := a.streamOnce(ctx, acc, host, string(encoded), str(body, "session_id"), sink)
+		if e == nil {
+			return result, nil
 		}
-		a.headers(req, acc, true)
-		resp, e = a.client.Do(req)
-		if e != nil {
-			return result, errors.New("upstream_connection_failed")
-		}
-		if resp.StatusCode == 401 && attempt == 0 {
-			resp.Body.Close()
-			acc, e = a.fresh(ctx, acc, true)
-			if e != nil {
-				return result, e
+		var u *UpstreamError
+		// An expired token surfaces either as HTTP 401 or as code 1001 inside an
+		// accepted stream. Retrying is only safe before anything reached the
+		// client, so a partially streamed reply keeps its original error.
+		if attempt == 0 && !emitted && errors.As(e, &u) && (u.Status == 401 || u.Code == 1001) {
+			if next, err := a.fresh(ctx, acc, true); err == nil {
+				acc = next
+				continue
 			}
-			continue
 		}
-		break
+		return result, e
+	}
+	return Result{Finish: "stop", Usage: M{}}, errors.New("upstream_authentication_failed")
+}
+
+// streamOnce performs a single upstream attempt and reports whether any event
+// already reached the client; that decides whether the caller may still retry.
+func (a *App) streamOnce(ctx context.Context, acc Account, host, payload, session string, sink func(Event) error) (Result, bool, error) {
+	result := Result{Finish: "stop", Usage: M{}}
+	stream, cancel := context.WithCancel(ctx)
+	defer cancel()
+	req, e := http.NewRequestWithContext(stream, "POST", host+"/api/agent/v3/llm_utils_chat", strings.NewReader(payload))
+	if e != nil {
+		return result, false, e
+	}
+	a.headers(req, acc, true)
+	resp, e := a.client.Do(req)
+	if e != nil {
+		return result, false, errors.New("upstream_connection_failed")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return result, fmt.Errorf("upstream_http_%d", resp.StatusCode)
+		return result, false, &UpstreamError{Status: resp.StatusCode, Message: upstreamText(resp.Body)}
 	}
+	// The reference relay bounds the wait for the first stream event separately
+	// from the whole request, because a throttled account can hold the connection
+	// open without producing anything.
+	var timedOut atomic.Bool
+	timer := time.AfterFunc(a.cfg.FirstEvent, func() {
+		timedOut.Store(true)
+		cancel()
+	})
+	defer timer.Stop()
 	tools := map[int]ToolCall{}
 	total := 0
 	wireBytes := 0
 	done := false
-	e = parseSSE(resp.Body, func(event, payload string) error {
-		wireBytes += len(payload)
+	emitted := false
+	e = parseSSE(resp.Body, func(event, data string) error {
+		timer.Stop()
+		wireBytes += len(data)
 		if wireBytes > 48<<20 {
 			return errors.New("upstream_output_limit")
 		}
 		event = strings.ToLower(event)
-		if payload == "[DONE]" {
+		if data == "[DONE]" {
 			done = true
 			return errStreamDone
 		}
 		var m M
-		if json.Unmarshal([]byte(payload), &m) != nil {
+		if json.Unmarshal([]byte(data), &m) != nil {
 			return nil
 		}
 		switch event {
 		case "error":
-			return errors.New("upstream_event_error_" + str(m, "code"))
+			return &UpstreamError{Code: int(number(m, "code", 0)), Message: str(m, "message")}
 		case "done":
 			done = true
 			if f := str(m, "finish_reason"); f != "" {
@@ -370,6 +433,7 @@ func (a *App) runUpstream(ctx context.Context, acc Account, body M, sink func(Ev
 				} else {
 					result.Text += text
 				}
+				emitted = true
 				if e := sink(Event{Kind: kind, Text: text}); e != nil {
 					return e
 				}
@@ -378,10 +442,13 @@ func (a *App) runUpstream(ctx context.Context, acc Account, body M, sink func(Ev
 		return nil
 	})
 	if e != nil && !errors.Is(e, errStreamDone) {
-		return result, e
+		if timedOut.Load() {
+			return result, emitted, &UpstreamError{Cause: "upstream_first_event_timeout"}
+		}
+		return result, emitted, e
 	}
 	if !done {
-		return result, errors.New("upstream_closed_without_done")
+		return result, emitted, errors.New("upstream_closed_without_done")
 	}
 	indexes := []int{}
 	for i := range tools {
@@ -401,17 +468,16 @@ func (a *App) runUpstream(ctx context.Context, acc Account, body M, sink func(Ev
 		}
 		result.Tools = append(result.Tools, tc)
 		if e = sink(Event{Kind: "tool", Tool: tc}); e != nil {
-			return result, e
+			return result, true, e
 		}
 	}
 	if len(result.Tools) > 0 {
 		result.Finish = "tool_calls"
 	}
-	resp.Body.Close()
 	if acc.Scope != "saas" {
-		a.enrichUsage(ctx, acc, str(body, "session_id"), result.Usage)
+		a.enrichUsage(ctx, acc, session, result.Usage)
 	}
-	return result, nil
+	return result, true, nil
 }
 
 // Billing may lag behind done. Only accept matching session and token totals.

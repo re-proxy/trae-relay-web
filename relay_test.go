@@ -38,7 +38,32 @@ func (t rewriteTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 func testApp(t *testing.T) *App {
 	t.Helper()
-	a, e := newApp(Config{AdminPassword: "test-password-123456", MasterKey: base64Key(), DataDir: t.TempDir(), Concurrency: 2, Timeout: 5 * time.Second, Version: "3.4.0", VersionCode: "20260919"})
+	return testAppConfig(t, Config{})
+}
+func testAppConfig(t *testing.T, cfg Config) *App {
+	t.Helper()
+	if cfg.AdminPassword == "" {
+		cfg.AdminPassword = "test-password-123456"
+	}
+	if cfg.MasterKey == "" {
+		cfg.MasterKey = base64Key()
+	}
+	if cfg.DataDir == "" {
+		cfg.DataDir = t.TempDir()
+	}
+	if cfg.Concurrency == 0 {
+		cfg.Concurrency = 2
+	}
+	if cfg.Timeout == 0 {
+		cfg.Timeout = 5 * time.Second
+	}
+	if cfg.Version == "" {
+		cfg.Version = "3.4.0"
+	}
+	if cfg.VersionCode == "" {
+		cfg.VersionCode = "20260919"
+	}
+	a, e := newApp(cfg)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -541,5 +566,101 @@ func TestCacheUsageAttribution(t *testing.T) {
 	a.enrichUsage(context.Background(), Account{}, "session", usage)
 	if number(obj(usage["prompt_tokens_details"]), "cached_tokens", 0) != 6 {
 		t.Fatal(usage)
+	}
+}
+
+func chatBody(stream bool) M {
+	return M{"model": "test-model", "messages": []M{{"role": "user", "content": "hi"}}, "stream": stream}
+}
+func TestUpstreamErrorsKeepStatusAndMessage(t *testing.T) {
+	cases := []struct {
+		name, sse     string
+		status        int
+		kind, message string
+	}{
+		{"rate limited", `event: error
+data: {"code":4011,"message":"We're sorry, your requests have exceeded the rate limit."}
+
+`, 429, "rate_limit_error", "We're sorry, your requests have exceeded the rate limit."},
+		{"insufficient quota", "event: error\ndata: {\"code\":1005,\"message\":\"no quota left\"}\n\n", 403, "insufficient_quota", "no quota left"},
+		{"invalid request", "event: error\ndata: {\"code\":4001,\"message\":\"bad payload\"}\n\n", 400, "invalid_request_error", "bad payload"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a := testApp(t)
+			seed(t, a)
+			fixture(t, a, func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, c.sse)
+			})
+			w := request(a, "POST", "/v1/chat/completions", chatBody(false), a.store.apiKey(), nil)
+			if w.Code != c.status {
+				t.Fatalf("status %d body %s", w.Code, w.Body.String())
+			}
+			var out M
+			_ = json.Unmarshal(w.Body.Bytes(), &out)
+			e := obj(out["error"])
+			if e["type"] != c.kind || e["message"] != c.message || e["code"] == nil {
+				t.Fatal(w.Body.String())
+			}
+			s := request(a, "POST", "/v1/chat/completions", chatBody(true), a.store.apiKey(), nil)
+			if s.Code != c.status || !strings.Contains(s.Body.String(), c.kind) || strings.Contains(s.Body.String(), "[DONE]") {
+				t.Fatalf("stream body %s", s.Body.String())
+			}
+		})
+	}
+}
+func TestExpiredTokenMapsTo401(t *testing.T) {
+	a := testApp(t)
+	seed(t, a)
+	fixture(t, a, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "ExchangeToken") {
+			w.WriteHeader(500)
+			return
+		}
+		w.WriteHeader(401)
+		fmt.Fprint(w, `{"message":"token expired"}`)
+	})
+	w := request(a, "POST", "/v1/chat/completions", chatBody(false), a.store.apiKey(), nil)
+	if w.Code != 401 || !strings.Contains(w.Body.String(), "authentication_error") || !strings.Contains(w.Body.String(), "token expired") {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+}
+func TestStreamAuthErrorRefreshesOnce(t *testing.T) {
+	a := testApp(t)
+	seed(t, a)
+	var chat int
+	fixture(t, a, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "ExchangeToken") {
+			fmt.Fprint(w, `{"Result":{"Token":"FRESH_TOKEN","TokenExpireAt":"2999-01-01T00:00:00Z"}}`)
+			return
+		}
+		chat++
+		if r.Header.Get("Authorization") != "Cloud-IDE-JWT FRESH_TOKEN" {
+			fmt.Fprint(w, "event: error\ndata: {\"code\":1001,\"message\":\"auth expired\"}\n\n")
+			return
+		}
+		fmt.Fprint(w, "event: output\ndata: {\"content\":\"fresh reply\"}\n\nevent: done\ndata: {\"finish_reason\":\"stop\"}\n\n")
+	})
+	w := request(a, "POST", "/v1/chat/completions", chatBody(false), a.store.apiKey(), nil)
+	if w.Code != 200 || chat != 2 || !strings.Contains(w.Body.String(), "fresh reply") {
+		t.Fatalf("%d calls %d body %s", w.Code, chat, w.Body.String())
+	}
+	if acc, ok := a.store.active(); !ok || acc.Token != "FRESH_TOKEN" {
+		t.Fatal("refreshed token not persisted")
+	}
+}
+func TestFirstEventTimeoutIsReported(t *testing.T) {
+	a := testAppConfig(t, Config{FirstEvent: 100 * time.Millisecond})
+	seed(t, a)
+	fixture(t, a, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		w.(http.Flusher).Flush()
+		time.Sleep(600 * time.Millisecond)
+		fmt.Fprint(w, "event: done\ndata: {}\n\n")
+	})
+	w := request(a, "POST", "/v1/chat/completions", chatBody(false), a.store.apiKey(), nil)
+	if w.Code != 502 || !strings.Contains(w.Body.String(), "upstream_first_event_timeout") {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
 }

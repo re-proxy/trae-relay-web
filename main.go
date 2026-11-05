@@ -27,6 +27,7 @@ type Config struct {
 	Addr, DataDir, AdminPassword, MasterKey, Version, VersionCode string
 	Concurrency                                                   int
 	Timeout                                                       time.Duration
+	FirstEvent                                                    time.Duration
 	SecureCookie                                                  bool
 }
 type cachedModels struct {
@@ -66,6 +67,9 @@ func newApp(cfg Config) (*App, error) {
 	s, e := openStore(cfg.DataDir, cfg.MasterKey)
 	if e != nil {
 		return nil, e
+	}
+	if cfg.FirstEvent <= 0 {
+		cfg.FirstEvent = 120 * time.Second
 	}
 	tr := &http.Transport{Proxy: http.ProxyFromEnvironment, DialContext: (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext, TLSHandshakeTimeout: 15 * time.Second, ResponseHeaderTimeout: 45 * time.Second, MaxIdleConns: 32, MaxIdleConnsPerHost: 8, MaxConnsPerHost: 16, IdleConnTimeout: 90 * time.Second}
 	return &App{cfg: cfg, store: s, client: &http.Client{Transport: tr, Timeout: cfg.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, busy: map[string]int{}, models: map[string]cachedModels{}, sessions: map[string]Session{}, logins: map[string]*LoginAttempt{}, adminSessions: map[string]time.Time{}, loginGate: make(chan struct{}, 2), requests: make(chan struct{}, 64), root: context.Background()}, nil
@@ -236,7 +240,11 @@ func main() {
 	if n < 1 || n > 8 {
 		log.Fatal("RELAY_MAX_CONCURRENT must be 1..8")
 	}
-	cfg := Config{Addr: env("RELAY_LISTEN", "0.0.0.0:"+env("PORT", "8317")), DataDir: env("RELAY_DATA_DIR", "data"), AdminPassword: os.Getenv("RELAY_ADMIN_PASSWORD"), MasterKey: os.Getenv("RELAY_MASTER_KEY"), Version: env("TRAE_IDE_VERSION", "3.4.0"), VersionCode: env("TRAE_IDE_VERSION_CODE", "20260919"), Concurrency: n, Timeout: 180 * time.Second}
+	first, _ := strconv.Atoi(env("RELAY_FIRST_EVENT_TIMEOUT_SEC", "120"))
+	if first < 1 || first > 3600 {
+		log.Fatal("RELAY_FIRST_EVENT_TIMEOUT_SEC must be 1..3600")
+	}
+	cfg := Config{Addr: env("RELAY_LISTEN", "0.0.0.0:"+env("PORT", "8317")), DataDir: env("RELAY_DATA_DIR", "data"), AdminPassword: os.Getenv("RELAY_ADMIN_PASSWORD"), MasterKey: os.Getenv("RELAY_MASTER_KEY"), Version: env("TRAE_IDE_VERSION", "3.4.0"), VersionCode: env("TRAE_IDE_VERSION_CODE", "20260919"), Concurrency: n, Timeout: 180 * time.Second, FirstEvent: time.Duration(first) * time.Second}
 	cfg.SecureCookie = env("RELAY_SECURE_COOKIE", "false") == "true"
 	a, e := newApp(cfg)
 	if e != nil {
