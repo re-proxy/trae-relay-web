@@ -82,13 +82,17 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 		a.store.mu.Lock()
 		accounts := []M{}
 		for _, acc := range a.store.state.Accounts {
-			accounts = append(accounts, M{"id": acc.ID, "name": acc.Name, "enabled": acc.Enabled, "scope": acc.Scope, "tenant_name": acc.TenantName, "expiry": acc.Expiry})
+			accounts = append(accounts, M{"id": acc.ID, "name": acc.Name, "enabled": acc.Enabled, "scope": acc.Scope, "tenant_name": acc.TenantName, "expiry": acc.Expiry, "check": acc.Check, "balance": acc.Balance})
 		}
 		settings := M{}
 		for k, v := range a.store.state.Models {
 			settings[k] = v
 		}
 		usage := append([]Usage{}, a.store.state.Usage...)
+		keys := []M{}
+		for _, k := range a.store.keysLocked() {
+			keys = append(keys, M{"id": k.ID, "name": k.Name, "enabled": k.Enabled, "suffix": suffix(k.Secret), "created": k.Created})
+		}
 		a.store.mu.Unlock()
 		a.mu.Lock()
 		inflight := 0
@@ -100,7 +104,13 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 			models = append(models, a.models[acc.ID].Models...)
 		}
 		a.mu.Unlock()
-		writeJSON(w, 200, M{"accounts": accounts, "models": models, "settings": settings, "usage": usage, "in_flight": inflight, "api_key_suffix": suffix(a.store.apiKey()), "version": "0.1.0"})
+		writeJSON(w, 200, M{"accounts": accounts, "models": models, "settings": settings, "usage": usage, "keys": keys, "in_flight": inflight, "api_key_suffix": suffix(a.store.apiKey()), "version": "0.1.0"})
+	case r.URL.Path == "/admin/account/check" && r.Method == "POST":
+		a.accountInspect(w, r, false)
+	case r.URL.Path == "/admin/account/balance" && r.Method == "POST":
+		a.accountInspect(w, r, true)
+	case r.URL.Path == "/admin/key" && r.Method == "POST":
+		a.manageKey(w, r)
 	case r.URL.Path == "/admin/login/start" && r.Method == "POST":
 		v, e := a.beginLogin()
 		if e != nil {
@@ -212,7 +222,19 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, M{"ok": true})
 	case r.URL.Path == "/admin/key/rotate" && r.Method == "POST":
 		a.store.mu.Lock()
+		retained := []APIKey{}
+		for _, k := range a.store.state.Keys {
+			if k.ID != "legacy" {
+				retained = append(retained, k)
+			}
+		}
+		if len(retained) >= 32 {
+			a.store.mu.Unlock()
+			fail(w, 400, "key_limit_reached")
+			return
+		}
 		a.store.state.APIKey = secret()
+		a.store.state.Keys = retained
 		key := a.store.state.APIKey
 		e := a.store.saveLocked()
 		a.store.mu.Unlock()

@@ -29,6 +29,15 @@ type Account struct {
 	DeviceID     string `json:"device_id"`
 	PrivateKey   []byte `json:"private_key,omitempty"`
 	DeviceInfo   M      `json:"device_info,omitempty"`
+	Check        M      `json:"check,omitempty"`
+	Balance      M      `json:"balance,omitempty"`
+}
+type APIKey struct {
+	ID      string    `json:"id"`
+	Name    string    `json:"name"`
+	Secret  string    `json:"secret"`
+	Enabled bool      `json:"enabled"`
+	Created time.Time `json:"created"`
 }
 type ModelSetting struct {
 	Disabled bool   `json:"disabled"`
@@ -47,6 +56,7 @@ type Usage struct {
 type State struct {
 	Accounts []Account               `json:"accounts"`
 	APIKey   string                  `json:"api_key"`
+	Keys     []APIKey                `json:"keys,omitempty"`
 	Models   map[string]ModelSetting `json:"models"`
 	Usage    []Usage                 `json:"usage"`
 }
@@ -184,4 +194,24 @@ func (s *Store) setting(id string) ModelSetting {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.state.Models[id]
+}
+
+// The legacy key remains valid during migration and is independently manageable.
+func (s *Store) keysLocked() []APIKey {
+	out := append([]APIKey{}, s.state.Keys...)
+	if s.state.APIKey != "" {
+		out = append([]APIKey{{ID: "legacy", Name: "默认密钥", Secret: s.state.APIKey, Enabled: true}}, out...)
+	}
+	return out
+}
+func (s *Store) validKey(key string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	valid := false
+	for _, k := range s.keysLocked() {
+		if equal(key, k.Secret) && k.Enabled && key != "" {
+			valid = true
+		}
+	}
+	return valid
 }

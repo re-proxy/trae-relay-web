@@ -153,7 +153,7 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request) {
 	if key == "" {
 		key = r.Header.Get("X-API-Key")
 	}
-	if !equal(key, a.store.apiKey()) {
+	if !a.store.validKey(key) {
 		fail(w, 401, "invalid_api_key")
 		return
 	}

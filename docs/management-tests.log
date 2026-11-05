@@ -1,0 +1,38 @@
+=== RUN   TestMultipleKeysMigrationAndRevocation
+--- PASS: TestMultipleKeysMigrationAndRevocation (0.06s)
+=== RUN   TestPersonalBalanceAndMetadataCheck
+--- PASS: TestPersonalBalanceAndMetadataCheck (0.05s)
+=== RUN   TestBalanceParsingAndFailures
+--- PASS: TestBalanceParsingAndFailures (0.03s)
+=== RUN   TestEnterpriseQuotaIsNotRemainingBalance
+--- PASS: TestEnterpriseQuotaIsNotRemainingBalance (0.02s)
+=== RUN   TestEncryptedPersistence
+--- PASS: TestEncryptedPersistence (0.03s)
+=== RUN   TestAuthSeparationAndCSRF
+--- PASS: TestAuthSeparationAndCSRF (0.03s)
+=== RUN   TestSSEParsing
+--- PASS: TestSSEParsing (0.00s)
+=== RUN   TestNativeProtocolAndSSE
+--- PASS: TestNativeProtocolAndSSE (0.04s)
+=== RUN   TestPrematureEOFIsFailure
+--- PASS: TestPrematureEOFIsFailure (0.04s)
+=== RUN   TestResponsesPreviousAndLifecycle
+--- PASS: TestResponsesPreviousAndLifecycle (0.04s)
+=== RUN   TestCancellationAndConcurrency
+--- PASS: TestCancellationAndConcurrency (0.03s)
+=== RUN   TestPKCEDeviceSignatureAndCallbackBinding
+--- PASS: TestPKCEDeviceSignatureAndCallbackBinding (0.02s)
+=== RUN   TestModelCatalogAndMultimodalTools
+--- PASS: TestModelCatalogAndMultimodalTools (0.00s)
+=== RUN   TestStopAcrossUnicodeChunks
+--- PASS: TestStopAcrossUnicodeChunks (0.00s)
+=== RUN   TestResponseCustomNamespaceTools
+--- PASS: TestResponseCustomNamespaceTools (0.00s)
+=== RUN   TestPersonalCallbackExchangeAndLegacyRefresh
+--- PASS: TestPersonalCallbackExchangeAndLegacyRefresh (0.02s)
+=== RUN   TestEnterpriseCallbackTrustedIdentity
+--- PASS: TestEnterpriseCallbackTrustedIdentity (0.02s)
+=== RUN   TestCacheUsageAttribution
+--- PASS: TestCacheUsageAttribution (0.02s)
+PASS
+ok  	trae-relay-web	1.537s

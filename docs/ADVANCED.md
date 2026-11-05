@@ -43,7 +43,7 @@ curl http://127.0.0.1:8317/v1/responses \
 - Responses 会话缓存按账号隔离，最近 64 条，单条历史上限 4 MiB，**只在内存保留**，重启或淘汰后返回 `previous_response_not_found`。`store:false` 不缓存。此版本没有原 Windows 可选的会话持久化，也没有 GET / DELETE / cancel Responses 接口。
 - 用量只使用上游报告的 Token；个人缓存用量为 0 时，有限重试查询 `get_session_usage`，仅在 session 和输入/输出总量完全匹配时回填缓存。查询失败不影响生成结果。使用记录不保存消息正文。
 - 不实现严格 JSON Schema、采样参数、seed、n、max_tokens / max_output_tokens 控制，以及 hosted web/file search、code interpreter、Files/PDF、音频、Embeddings、Images、Realtime、Batch。`background:true` 和不支持的内容/工具类型会被拒绝；其余部分未知参数会被忽略。需要严格 OpenAI 语义的客户端请先验证。
-- 不支持国际版、企业 VPC / 私有部署。此版本未移植个人积分查询、自动签到、费率与金额统计；企业消费请在官方控制台查看。没有 Windows 自动发现、DPAPI、托盘和自启动。
+- 不支持国际版、企业 VPC / 私有部署。此版本支持手动个人积分查询和企业套餐额度查询，尚未移植自动签到、费率及实际消费金额统计；企业消费请在官方控制台查看。没有 Windows 自动发现、DPAPI、托盘和自启动。
 
 ## 可选环境变量
 
@@ -97,3 +97,16 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o relay-linux-amd64 .
 测试通过本机临时 HTTP 服务替代传输层，生产主机地址仍固定为官方域名。测试覆盖加密防篡改与恢复、权限隔离、CSRF、密钥轮换、原生聊天协议、SSE/断流、工具/图片/思考、Responses 生命周期与多轮、PKCE/P-256、个人授权/旧刷新/企业刷新与身份验证、可信主机限制、用量归属、取消及并发。它们验证移植逻辑，不能替代官方真实兼容性测试。
 
 完整验证记录见 [VALIDATION.md](../VALIDATION.md)。
+
+## 管理接口补充
+
+这些接口需要管理 Cookie，同样要求 JSON 请求和同源 Origin；API Key 不具备管理权限。
+
+| POST 路径 | 请求示例 | 说明 |
+| --- | --- | --- |
+| `/admin/account/check` | `{"id":"账号 ID"}` | 身份 + 实时目录检查，不发送生成请求 |
+| `/admin/account/balance` | `{"id":"账号 ID"}` | 查询个人积分 / 企业套餐额度 |
+| `/admin/key` | `{"action":"create","name":"工作站"}` | 创建独立 Key，响应仅此时带完整密钥 |
+| `/admin/key` | `{"action":"disable","id":"密钥 ID"}` | 另支持 enable、delete；rename 还需 name |
+
+诊断接口以 `ok` 字段标识查询是否成功，并附检查时间。HTTP 200 本身不表示账号验证成功。余额与诊断结果保存在加密状态中。个人余额移植自原项目 `ide_user_ent_usage`：优先 usage_summary，其次积分事件，最后有效权益包；企业只显示官方 plan_attribute 套餐额度，不推算剩余金额。未使用真实账号实测。

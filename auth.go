@@ -251,6 +251,8 @@ func (a *App) fresh(ctx context.Context, acc Account, force bool) (Account, erro
 		defer a.store.mu.Unlock()
 		for i, current := range a.store.state.Accounts {
 			if current.ID == next.ID {
+				next.Check = current.Check
+				next.Balance = current.Balance
 				a.store.state.Accounts[i] = next
 				return next, a.store.saveLocked()
 			}
