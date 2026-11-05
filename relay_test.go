@@ -745,3 +745,24 @@ func TestModelsMergeAcrossAccounts(t *testing.T) {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
 }
+
+func TestUpstreamRequestIdentifiesDesktopClient(t *testing.T) {
+	a := testApp(t)
+	seed(t, a)
+	seen := ""
+	fixture(t, a, func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: output\ndata: {\"content\":\"ok\"}\n\nevent: done\ndata: {}\n\n")
+	})
+	w := request(a, "POST", "/v1/chat/completions", M{"model": "test-model", "messages": []M{{"role": "user", "content": "hi"}}}, a.store.apiKey(), nil)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	// A library default such as "Go-http-client/1.1" makes upstream answer a
+	// misleading 4011 rate-limit error, so the request must identify as the
+	// desktop client build that the credentials belong to.
+	if seen != "Trae/"+a.cfg.Version {
+		t.Fatalf("unexpected user agent %q", seen)
+	}
+}

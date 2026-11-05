@@ -155,3 +155,11 @@
 - `TestModelsMergeAcrossAccounts`：`/v1/models` 同时返回两个账号各自独有的模型。
 
 未验证边界：真实多账号的上游并发与限流表现未实测（本地实例只有一个 Trae 账号），排队与选择逻辑仅由离线夹具覆盖。
+
+## 上游 User-Agent 修复
+
+Go 默认的 `User-Agent: Go-http-client/1.1` 会被上游当作非客户端流量，返回 SSE `event:error {"code":4011,"message":"...exceeded the rate limit..."}`；同一 token、同一请求体、同一组 IDE 头下改成 `Trae/3.4.0` 即可正常生成，`curl/8.5.0`、`Python-urllib/3.11`、`Go-http-client/2.0` 均被同样拒绝。修复为所有上游请求发送 `User-Agent: Trae/<IDE 版本>`。
+
+新增测试 `TestUpstreamRequestIdentifiesDesktopClient` 断言上游收到该 UA，当次完整套件 27 项、`go test -race` 通过。
+
+真机验证：容器重建后 10.45:8317 对 `deepseek-v4.1-flash` 的流式与非流式请求均返回 200 与真实内容（此前稳定 `429 upstream_rate_limited`）。

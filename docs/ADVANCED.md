@@ -34,7 +34,7 @@ curl http://127.0.0.1:8317/v1/responses \
 
 ### 协议与兼容边界
 
-- 上游为 `/api/agent/v3/llm_utils_chat`，使用 `Cloud-IDE-JWT` / IDE 请求头。模型从 `/api/ide/v1/get_detail_param` 的 `chat_v3` 和 `solo_agent` 目录合并，过滤隐藏、自定义和内部模型，正常每小时刷新，失败每五分钟重试；管理页或请求可即时触发拉取。
+- 上游为 `/api/agent/v3/llm_utils_chat`，使用 `Cloud-IDE-JWT` / IDE 请求头，并以 `User-Agent: Trae/<IDE 版本>` 标识桌面客户端；上游对 `Go-http-client`、`curl`、`Python-urllib` 这类库默认 UA 会返回伪造的 `4011 请求过于频繁`，所以该头不可省略。模型从 `/api/ide/v1/get_detail_param` 的 `chat_v3` 和 `solo_agent` 目录合并，过滤隐藏、自定义和内部模型，正常每小时刷新，失败每五分钟重试；管理页或请求可即时触发拉取。
 - `tools[].function.parameters` 从对象序列化为上游 JSON 字符串；工具历史改写为上游 `function_call`；按 index 拼接增量/快照参数，done 后输出完整调用。工具图片结果延迟补为标注来源的用户图片消息，保留连续工具结果的配对。
 - 正文和 reasoning 均为增量，不会误删重复片段。只在真正收到 `done` / `[DONE]` 后成功；提前断流发出错误，不输出虚假的完成事件。HTTP 401 握手失败或流内 error 事件 code 1001 都只刷新凭据重试一次，且仅当还没有任何事件发给客户端；刷新失败按 401 返回。
 - 上游失败保留语义：HTTP 401 / code 1001 → `401 authentication_error`，code 1005 → `403 insufficient_quota`，code 429 / 4008 / 4011 / HTTP 429 → `429 rate_limit_error`，code 4001 → `400 invalid_request_error`，其余 → `502 api_error`。响应同时给出脱敏 `code`（如 `upstream_rate_limited`）和上游原始 `message`，便于区分限流、额度与鉴权问题；已经发出事件后才失败时，改用错误帧 / `response.failed` 结束。
@@ -69,6 +69,8 @@ HTTPS 反向代理部署时，添加 `RELAY_SECURE_COOKIE=true`，代理保留 H
 | `PORT` | 8317，服务与镜像健康检查使用 |
 | `TRAE_IDE_VERSION` | 3.4.0，来自参考登录实现默认值，可覆盖 |
 | `TRAE_IDE_VERSION_CODE` | 20260919，协议参考值，可覆盖；应与实际可用 IDE 构建对应 |
+
+上游错误码并不可靠：同一个 `4011` 既用于真实限流，也用于拒绝库默认 UA 的请求，遇到「积分充足、账号刚注册却全部 4011」时先核对 `User-Agent` 是否被改成库默认值。
 
 IDE 版本头属于上游非公开兼容协议，本项目不自动探测或声称固定值永远有效。遇到模型目录异常时，先检查参考客户端当前版本与构建日期，再更新环境变量。
 

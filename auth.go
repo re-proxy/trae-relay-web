@@ -121,6 +121,10 @@ func (a *App) post(ctx context.Context, host, path string, body any, acc Account
 func (a *App) headers(r *http.Request, acc Account, sse bool) {
 	h := r.Header
 	h.Set("Content-Type", "application/json")
+	// Upstream rejects well-known library user agents (Go-http-client, curl,
+	// Python-urllib) with a misleading 4011 "rate limit" error, so identify as
+	// the desktop client the credentials belong to.
+	h.Set("User-Agent", "Trae/"+a.cfg.Version)
 	h.Set("Authorization", "Cloud-IDE-JWT "+acc.Token)
 	h.Set("x-cloudide-token", acc.Token)
 	h.Set("x-ide-token", acc.Token)
