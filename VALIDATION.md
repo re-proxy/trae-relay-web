@@ -176,3 +176,20 @@ Go 默认的 `User-Agent: Go-http-client/1.1` 会被上游当作非客户端流�
 新增 6 项离线测试（稳定标识向量、状态解析、领取并确认、claim 失败不重放、签到使用稳定设备标识、due 规则），完整套件 **33 项**，`go test -race ./...` 通过，`gofmt`/`go vet` 干净。
 
 未验证：真实上游签到成功路径未在本次改动中实测（需要真实账号当日未签到）。
+
+## 模型卡片与计费倍率（2026-11-06）
+
+新增 `TestPricingProfilesAndDiscounts`、`TestPricingUnknownZeroAndMalformed`、`TestPricingDetailOverrideAndMerge` 三项测试，覆盖字符串/对象目录字段、父级/详情覆盖、普通/Max 分离、活动前原价、会员与活动价、闲时窗口、有效 0、未知/负值/非有限值。完整现有测试套件在 WSL `go test -race -v ./...` 下通过，无 race 报告；Linux 构建及前端 JavaScript 语法检查通过。
+
+模型页（`/models`）用卡片展示目录：搜索名称/ID/提供方、按已启用/图片/思考/Max 筛选，卡片内就地编辑别名、思考档位、Max 与启用，保存后才写入设置；切换 Max 时倍率区改用 `max_pricing`，缺失时显示“上游未提供”，不按 0 或普通档位推算。截图见 [模型目录](docs/models.png)。
+
+本机预览实例（127.0.0.1:8321，使用复制出的加密状态，未触动线上容器）的验收记录：
+
+- 目录 18 个模型均返回 `pricing` 与 `max_pricing`，卡片显示基础倍率与活动/会员倍率。
+- 搜索 `doubao` 过滤到 4 / 18；清空搜索后该卡片未保存的别名与 Max 勾选仍在。
+- 保存后 `/admin/state` 返回 `{"Doubao-Seed-2.1-Pro":{"alias":"doubao-pro","max":true}}`，刷新页面后正确恢复，保存按钮在无改动时禁用。
+- 关闭启用开关时卡片变暗并显示“已停用”，恢复后提示消失。
+- 窄屏 390 宽下单列卡片，字段与倍率区换行正常。
+- 管理页四个页面路径（`/`、`/models`、`/keys`、`/usage` 与别名 `/accounts`、`/access`）均返回同一外壳，直接深链可打开并保持登录态，浏览器前进后退切换页面。
+
+真实上游倍率与账号折扣资格仍未通过真实账号验证。

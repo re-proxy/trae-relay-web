@@ -80,23 +80,120 @@ box.append(form);return box;
 }
 
 /* ---------- models ---------- */
+const modelDrafts=new Map();
+function rateText(v){return typeof v==='number'&&Number.isFinite(v)&&v>=0?v.toLocaleString(undefined,{maximumFractionDigits:6})+'×':null;}
+function rateWindow(w){
+if(!w)return '';
+const days=['一','二','三','四','五','六','日'],names=Array.isArray(w.weekdays)?w.weekdays.map(d=>days[d-1]).filter(Boolean):[];
+const span=Number.isFinite(w.start_minute)&&Number.isFinite(w.end_minute)?String(Math.floor(w.start_minute/60)).padStart(2,'0')+':'+String(w.start_minute%60).padStart(2,'0')+'–'+String(Math.floor(w.end_minute/60)).padStart(2,'0')+':'+String(w.end_minute%60).padStart(2,'0'):'';
+return [names.length?'周'+names.join('、'):'',span].filter(Boolean).join(' ');
+}
+function pricingPanel(m,max){
+const box=el('div',undefined,'rates'),p=max?m.max_pricing:m.pricing;
+const main=el('div',undefined,'main'),base=rateText(p&&p.catalog_rate);
+main.append(el('span',max?'MAX 基础倍率':'基础倍率'),el('strong',base||'—'));
+if(!base)main.append(el('small','上游未提供'));
+box.append(main);
+if(p){
+const detail=el('div',undefined,'detail');
+const add=(label,value)=>{if(!value)return;const d=el('div');d.append(el('span',label),el('strong',value));detail.append(d);};
+add('会员',rateText(p.member_rate));
+add('活动',rateText(p.activity_rate));
+add('活动会员',rateText(p.activity_member_rate));
+if(detail.children.length)box.append(detail);
+const notes=[];
+const offPeak=(p.off_peak_windows||[]).map(rateWindow).filter(Boolean).join(' / ');
+if(p.activity_type==='off_peak'&&offPeak)notes.push('闲时活动（北京时间）：'+offPeak);
+if(p.member_rate!==undefined||p.activity_rate!==undefined)notes.push('会员与活动价需满足上游条件，本页不推算实际扣费。');
+if(notes.length)box.append(el('p',notes.join(' '),'cond'));
+}
+if(!p)box.append(el('p','该档位未返回倍率，不会按 0 或另一档位价格处理。','cond'));
+return box;
+}
 function modelsPage(page){
-const s=S,root=el('div',undefined,'page');
+const root=el('div',undefined,'page'),s=S;
 const refreshCatalog=async()=>{notice('正在请求上游模型目录…');await api('models/refresh',{});notice('模型目录已更新');await refresh();};
-root.append(pageHead(page,s.models.length?`${s.models.length} 个可选`:'',[button('刷新',refresh),button('刷新模型目录',refreshCatalog,'primary')]));
+root.append(pageHead(page,s.models.length?s.models.length+' 个可选':'',[button('刷新',refresh),button('刷新模型目录',refreshCatalog,'primary')]));
 if(!s.models.length){root.append(emptyBox('模型目录还没有加载','模型清单来自启用账号的实时上游目录，未加载前不会提供虚构模型。',['确认至少一个账号已启用','点击「刷新模型目录」向上游读取','读取失败会保留上次成功的目录']));return root;}
-const list=el('section',undefined,'list');
-for(const m of s.models){
-const st=s.settings[m.id]||{},row=el('div',undefined,'modelRow'),desc=el('div',undefined,'modelName');
-desc.append(el('strong',m.display_name),el('small',m.id+' · '+m.function+(m.vision?' · 支持图片':'')));
-const aliasField=el('label',undefined,'field'),alias=el('input');alias.value=st.alias||'';alias.placeholder='客户端请求名，例如 gpt-4o';alias.setAttribute('aria-label',m.id+' 别名');aliasField.append(el('span','别名'),alias);
-const effortField=el('label',undefined,'field'),effort=el('select');effort.setAttribute('aria-label',m.id+' 思考档位');const def=el('option','跟随上游默认');def.value='';effort.append(def);for(const e of m.efforts||[]){const opt=el('option',e);opt.value=e;effort.append(opt);}effort.value=st.effort||'';effortField.append(el('span','思考档位'),effort);
-const checks=el('div',undefined,'checks'),enabled=el('input'),max=el('input');enabled.type='checkbox';enabled.checked=!st.disabled;max.type='checkbox';max.checked=!!st.max;max.disabled=!m.max;
-const enableLabel=el('label'),maxLabel=el('label');enableLabel.append(enabled,el('span','启用'));maxLabel.append(max,el('span','Max'));if(!m.max)maxLabel.className='off';
-checks.append(enableLabel,maxLabel);
-const save=button('保存',async()=>{await api('model',{id:m.id,setting:{disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:max.checked}});notice('已保存 '+m.display_name+' 的设置');});
-row.append(desc,aliasField,effortField,checks,save);list.append(row);}
-root.append(list);return root;
+
+const view={q:'',filter:'all'};
+const bar=el('div',undefined,'toolbar');
+const search=el('input');search.type='search';search.placeholder='搜索名称、ID 或提供方';search.setAttribute('aria-label','搜索模型');
+const filter=el('select');filter.setAttribute('aria-label','筛选模型');
+for(const [value,label] of [['all','全部模型'],['enabled','已启用'],['vision','图片'],['reasoning','思考'],['max','Max']]){const o=el('option',label);o.value=value;filter.append(o);}
+const count=el('span','','count');
+search.oninput=()=>{view.q=search.value.trim().toLowerCase();paint();};
+filter.onchange=()=>{view.filter=filter.value;paint();};
+bar.append(search,filter,count);
+root.append(bar,el('p','倍率是上游目录给出的计费基数，不是每百万 token 的货币价格。','fine'));
+
+const grid=el('section',undefined,'mGrid');
+root.append(grid);
+const matches=m=>{
+const q=view.q;
+if(q&&!(m.display_name+' '+m.id+' '+(m.provider||'')).toLowerCase().includes(q))return false;
+switch(view.filter){case 'enabled':return !(s.settings[m.id]||{}).disabled;case 'vision':return !!m.vision;case 'reasoning':return !!(m.efforts&&m.efforts.length);case 'max':return !!m.max;default:return true;}
+};
+const snapshot=m=>{const st=s.settings[m.id]||{};return {disabled:!!st.disabled,alias:st.alias||'',effort:st.effort||'',max:!!st.max};};
+function paint(){
+grid.textContent='';
+const shown=s.models.filter(matches);
+count.textContent=shown.length+' / '+s.models.length+' 个';
+if(!shown.length){grid.append(emptyBox('没有匹配的模型','换个关键词或切回「全部模型」继续浏览。',null));return;}
+for(const m of shown)grid.append(modelCard(m));
+}
+function modelCard(m){
+const draft=modelDrafts.get(m.id)||snapshot(m),st=draft;
+const card=el('article',undefined,st.disabled?'mCard off':'mCard');
+const head=el('div',undefined,'mHead'),title=el('div',undefined,'mTitle');
+title.append(el('small',(m.provider||'上游目录')+' · '+m.function),el('h3',m.display_name),el('code',m.id));
+const enabled=el('input');enabled.type='checkbox';enabled.checked=!st.disabled;enabled.setAttribute('aria-label',m.display_name+' 启用');
+const toggle=el('label',undefined,'switch');toggle.append(enabled,el('span',st.disabled?'已停用':'启用'));
+head.append(title,toggle);
+const tags=el('div',undefined,'tags');
+tags.append(el('span',st.max&&m.max?'Max':'标准','tag'+(st.max&&m.max?' on':'')));
+if(m.vision)tags.append(el('span','图片','tag'));
+if(m.efforts&&m.efforts.length)tags.append(el('span','思考 · '+(st.effort||m.default_effort||'默认'),'tag'));
+if(m.context)tags.append(el('span',Math.round(m.context/1000)+'K 上下文','tag'));
+card.append(head,tags,pricingPanel(m,st.max&&m.max));
+
+const fields=el('div',undefined,'mFields');
+const aliasField=el('label'),alias=el('input');alias.value=st.alias;alias.placeholder='客户端请求名，例如 gpt-4o';alias.setAttribute('aria-label',m.display_name+' 别名');aliasField.append(el('span','API 别名'),alias);
+const effortField=el('label'),effort=el('select');effort.setAttribute('aria-label',m.display_name+' 思考档位');const def=el('option','跟随默认');def.value='';effort.append(def);for(const e of m.efforts||[]){const o=el('option',e);o.value=e;effort.append(o);}effort.value=st.effort;effortField.append(el('span','思考档位'),effort);
+fields.append(aliasField,effortField);
+card.append(fields);
+
+const maxLabel=el('label',undefined,'switch'+(m.max?'':' off')),maxBox=el('input');maxBox.type='checkbox';maxBox.checked=st.max;maxBox.disabled=!m.max;maxBox.setAttribute('aria-label',m.display_name+' Max 模式');maxLabel.append(maxBox,el('span','Max 模式'));
+const bottom=el('div',undefined,'mBottom'),hint=el('span',st.dirty?'有未保存的修改':'','draft');const save=button('保存偏好',async()=>{
+await api('model',{id:m.id,setting:{disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:maxBox.checked}});
+modelDrafts.delete(m.id);
+s.settings={...s.settings,[m.id]:{disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:maxBox.checked}};
+notice('已保存 '+m.display_name+' 的偏好');paint();
+});
+save.disabled=!st.dirty;
+bottom.append(maxLabel,hint,save);
+
+const touch=()=>{
+const base=snapshot(m),next={disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:maxBox.checked};
+const dirty=next.disabled!==base.disabled||next.alias!==base.alias||next.effort!==base.effort||next.max!==base.max;
+if(dirty)modelDrafts.set(m.id,next);else modelDrafts.delete(m.id);
+toggle.lastChild.textContent=next.disabled?'已停用':'启用';
+card.className=next.disabled?'mCard off':'mCard';
+hint.textContent=dirty?'有未保存的修改':'';
+save.disabled=!dirty;
+paint2(m,next,tags,card);
+};
+function paint2(m,next,tagsNode,cardNode){
+// Max 只影响倍率与标签，就地更新避免失焦
+tagsNode.firstChild.textContent=next.max&&m.max?'Max':'标准';
+const old=cardNode.querySelector('.rates');if(old)old.replaceWith(pricingPanel(m,next.max&&m.max));
+}
+enabled.onchange=touch;maxBox.onchange=touch;alias.oninput=touch;effort.onchange=touch;
+card.append(bottom);
+return card;
+}
+paint();
+return root;
 }
 
 /* ---------- keys ---------- */
