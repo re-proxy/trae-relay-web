@@ -8,7 +8,7 @@ const PAGES=[
 {id:'usage',label:'使用记录',path:'/usage',desc:'最近 500 次请求'}
 ];
 const PAGE_ALIAS={'/accounts':'/','/access':'/keys'};
-let S=null,attempt='',authorization=null;
+let S=null,attempt='',authorization=null,pinnedKey='';
 
 function currentPage(){const p=PAGE_ALIAS[location.pathname]||location.pathname;return PAGES.find(x=>x.path===p)||PAGES[0];}
 function endpoint(){return location.origin+'/v1';}
@@ -26,7 +26,7 @@ function link(text,path){const a=el('a',text);a.href=path;a.onclick=go;return a;
 
 function go(event){const a=event.currentTarget;if(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();if(a.pathname===location.pathname){render();return;}history.pushState({},'',a.pathname);render();}
 
-function showLogin(){S=null;attempt='';authorization=null;const p=$('password'),c=$('callback');if(p)p.value='';if(c)c.value='';render();}
+function showLogin(){S=null;attempt='';authorization=null;pinnedKey='';const p=$('password'),c=$('callback');if(p)p.value='';if(c)c.value='';render();}
 async function refresh(){S=await api('state');render();}
 
 /* ---------- page furniture ---------- */
@@ -212,13 +212,13 @@ root.append(endpointBox);
 
 const form=el('form',undefined,'keyForm'),label=el('label','密钥名称'),name=el('input');name.maxLength=120;name.placeholder='例如：开发工作站';name.required=true;
 label.append(name);const submit=el('button','＋ 创建 API Key','primary');submit.type='submit';form.append(label,submit);
-const box=el('div');box.hidden=true;box.className='newKeyBox';
-const boxLabel=el('label','新密钥只显示这一次，现在复制保存'),key=el('input');key.readOnly=true;boxLabel.append(key);
+const box=el('div',undefined,'newKeyBox'),key=el('input');key.readOnly=true;key.value=pinnedKey;box.hidden=!pinnedKey;
+const boxLabel=el('label','新密钥只显示这一次，现在复制保存');boxLabel.append(key);
 const boxActions=el('div',undefined,'actions'),copyKey=el('button','复制密钥','primary'),hide=el('button','已保存，隐藏');
 copyKey.type='button';hide.type='button';boxActions.append(copyKey,hide);box.append(boxLabel,boxActions);
-copyKey.onclick=()=>action(async()=>{try{await navigator.clipboard.writeText(key.value);notice('密钥已复制');}catch{notice('复制失败，请手动选中密钥');}});
-hide.onclick=()=>{key.value='';box.hidden=true;};
-form.onsubmit=e=>{e.preventDefault();action(async()=>{submit.disabled=true;try{const r=await api('key',{action:'create',name:name.value});key.value=r.api_key;box.hidden=false;name.value='';await refresh();}finally{submit.disabled=false;}});};
+copyKey.onclick=()=>action(async()=>{try{await navigator.clipboard.writeText(pinnedKey);notice('密钥已复制');}catch{notice('复制失败，请手动选中密钥');}});
+hide.onclick=()=>{pinnedKey='';key.value='';box.hidden=true;};
+form.onsubmit=e=>{e.preventDefault();action(async()=>{submit.disabled=true;try{const r=await api('key',{action:'create',name:name.value});pinnedKey=r.api_key;key.value=pinnedKey;box.hidden=false;name.value='';notice('已创建密钥，请复制保存');await refresh();}finally{submit.disabled=false;}});};
 root.append(form,box);
 
 const list=el('section',undefined,'list');
