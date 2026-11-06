@@ -71,6 +71,7 @@ type App struct {
 	adminSessions map[string]time.Time
 	loginGate     chan struct{}
 	requests      chan struct{}
+	balanceGate   chan struct{}
 	root          context.Context
 }
 
@@ -98,7 +99,7 @@ func newApp(cfg Config) (*App, error) {
 		cfg.MinInterval = 0
 	}
 	tr := &http.Transport{Proxy: http.ProxyFromEnvironment, DialContext: (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext, TLSHandshakeTimeout: 15 * time.Second, ResponseHeaderTimeout: 45 * time.Second, MaxIdleConns: 32, MaxIdleConnsPerHost: 8, MaxConnsPerHost: 16, IdleConnTimeout: 90 * time.Second}
-	return &App{cfg: cfg, store: s, client: &http.Client{Transport: tr, Timeout: cfg.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, busy: map[string]int{}, lastUsed: map[string]time.Time{}, models: map[string]cachedModels{}, sessions: map[string]Session{}, logins: map[string]*LoginAttempt{}, adminSessions: map[string]time.Time{}, loginGate: make(chan struct{}, 2), requests: make(chan struct{}, 64), root: context.Background()}, nil
+	return &App{cfg: cfg, store: s, client: &http.Client{Transport: tr, Timeout: cfg.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, busy: map[string]int{}, lastUsed: map[string]time.Time{}, models: map[string]cachedModels{}, sessions: map[string]Session{}, logins: map[string]*LoginAttempt{}, adminSessions: map[string]time.Time{}, loginGate: make(chan struct{}, 2), requests: make(chan struct{}, 64), balanceGate: make(chan struct{}, 1), root: context.Background()}, nil
 }
 func equal(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -190,6 +191,8 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/v1/status" && r.Method == "GET":
 		a.status(w)
+	case r.URL.Path == "/v1/balance" && r.Method == "GET":
+		a.balanceAPI(w, r)
 	case r.URL.Path == "/v1/models" && r.Method == "GET":
 		accounts, ok := a.store.enabled()
 		if !ok {

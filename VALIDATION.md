@@ -199,3 +199,19 @@ Go 默认的 `User-Agent: Go-http-client/1.1` 会被上游当作非客户端流�
 在最新四页控制台上保留路由与侧栏，只将模型页改为紧凑横向行，折叠别名、思考档位和 Max 编辑区，名称/能力/倍率/启用与保存常显。独立演示目录加载 18 个模型验收，未使用真实账号。另修正有未保存草稿时重新绘制列表的保存按钮状态。
 
 与远端四页路由改版合并后再次在 `/models` 验收：18 个演示模型默认显示为紧凑行，偏好展开后可编辑别名/Max，折叠后保存按钮保持可用，保存及刷新后 Max 状态正确恢复。截图已更新为四页控制台中的紧凑列表。JavaScript 语法检查通过，验收进程仅使用项目临时数据。
+
+## 下游余额 API（2026-11-06）
+
+新增 `GET /v1/balance`，沿用 Bearer / X-API-Key 鉴权，查询启用账号池；个人积分按同一单位汇总，企业套餐额度单列。结果缓存 60 秒，并发轮询合并等待，每次最多同时查询 4 个账号。未知余额为 null，部分失败标记 complete:false，全部失败返回 502；不向下游返回账号名称、上游身份或凭据。
+
+新增 5 项离线 HTTP 夹具测试：
+
+- `TestBalanceAPIAuthAggregateAndCache`：认证、排除停用账号、合计、有效零余额、缓存命中/过期、隐私字段排除。
+- `TestBalanceAPIPartialFailuresAndUnknown`：部分失败和全部失败、过期旧值不冒充成功、不原地修改共享缓存。
+- `TestBalanceAPIEnterpriseQuotaIsSeparate`：企业套餐额度单列，未知剩余额度不充作 0 或积分；无启用账号返回 503。
+- `TestBalanceAPIConcurrentPollsCoalesce`：8 个并行轮询只产生一次实际查询。
+- `TestBalanceAPIKeyRevocationAndCancelledWait`：X-API-Key、停用 Key 拒绝、取消等待正常返回。
+
+完整套件 `go test -race -v ./...`、`go vet ./...` 和 Linux 构建通过，原始记录见 [余额 API 测试](docs/balance-api-tests.log)。全部使用本机离线夹具，不调用真实账号。旧 Compose 检查脚本包含已过时的无变量断言，首次测试后的该断言失败；最终使用独立回归脚本完整运行，退出码为 0，没有更改现有 Compose 配置。
+
+接口是自定义的池余额查询，非 OpenAI 标准美元账单接口；router 接入与字段语义见 [BALANCE_API.md](docs/BALANCE_API.md)。Docker 和真实上游验证边界保持不变。

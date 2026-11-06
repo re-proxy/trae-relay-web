@@ -1,0 +1,102 @@
+=== RUN   TestBalanceAPIKeyRevocationAndCancelledWait
+--- PASS: TestBalanceAPIKeyRevocationAndCancelledWait (0.05s)
+=== RUN   TestBalanceAPIAuthAggregateAndCache
+--- PASS: TestBalanceAPIAuthAggregateAndCache (0.12s)
+=== RUN   TestBalanceAPIPartialFailuresAndUnknown
+--- PASS: TestBalanceAPIPartialFailuresAndUnknown (0.09s)
+=== RUN   TestBalanceAPIEnterpriseQuotaIsSeparate
+--- PASS: TestBalanceAPIEnterpriseQuotaIsSeparate (0.05s)
+=== RUN   TestBalanceAPIConcurrentPollsCoalesce
+--- PASS: TestBalanceAPIConcurrentPollsCoalesce (0.07s)
+=== RUN   TestCheckinDeviceID
+--- PASS: TestCheckinDeviceID (0.00s)
+=== RUN   TestCheckinStateParsing
+--- PASS: TestCheckinStateParsing (0.00s)
+=== RUN   TestCheckinClaimsAndConfirms
+2026/11/06 22:04:39 checkin credited account=acc amount=10.0
+--- PASS: TestCheckinClaimsAndConfirms (0.06s)
+=== RUN   TestCheckinClaimFailureRechecksStatus
+--- PASS: TestCheckinClaimFailureRechecksStatus (0.04s)
+=== RUN   TestCheckinUsesStableDeviceID
+--- PASS: TestCheckinUsesStableDeviceID (0.04s)
+=== RUN   TestCheckinDueRules
+--- PASS: TestCheckinDueRules (0.00s)
+=== RUN   TestMultipleKeysMigrationAndRevocation
+--- PASS: TestMultipleKeysMigrationAndRevocation (0.08s)
+=== RUN   TestPersonalBalanceAndMetadataCheck
+--- PASS: TestPersonalBalanceAndMetadataCheck (0.06s)
+=== RUN   TestBalanceParsingAndFailures
+--- PASS: TestBalanceParsingAndFailures (0.04s)
+=== RUN   TestEnterpriseQuotaIsNotRemainingBalance
+--- PASS: TestEnterpriseQuotaIsNotRemainingBalance (0.03s)
+=== RUN   TestAdminPasswordOnlyRequiresNonEmpty
+--- PASS: TestAdminPasswordOnlyRequiresNonEmpty (0.02s)
+=== RUN   TestPricingProfilesAndDiscounts
+--- PASS: TestPricingProfilesAndDiscounts (0.00s)
+=== RUN   TestPricingUnknownZeroAndMalformed
+--- PASS: TestPricingUnknownZeroAndMalformed (0.00s)
+=== RUN   TestPricingDetailOverrideAndMerge
+--- PASS: TestPricingDetailOverrideAndMerge (0.00s)
+=== RUN   TestEncryptedPersistence
+--- PASS: TestEncryptedPersistence (0.05s)
+=== RUN   TestAuthSeparationAndCSRF
+--- PASS: TestAuthSeparationAndCSRF (0.04s)
+=== RUN   TestSSEParsing
+--- PASS: TestSSEParsing (0.00s)
+=== RUN   TestNativeProtocolAndSSE
+--- PASS: TestNativeProtocolAndSSE (0.05s)
+=== RUN   TestPrematureEOFIsFailure
+2026/11/06 22:04:39 upstream failure model=test-model account=acc status=502 code=upstream_request_failed message=Upstream request failed
+2026/11/06 22:04:39 upstream failure model=test-model account=acc status=502 code=upstream_request_failed message=Upstream request failed
+--- PASS: TestPrematureEOFIsFailure (0.05s)
+=== RUN   TestResponsesPreviousAndLifecycle
+--- PASS: TestResponsesPreviousAndLifecycle (0.05s)
+=== RUN   TestCancellationAndConcurrency
+2026/11/06 22:04:39 upstream failure model=test-model account=acc status=502 code=upstream_request_failed message=Upstream request failed
+--- PASS: TestCancellationAndConcurrency (0.04s)
+=== RUN   TestPKCEDeviceSignatureAndCallbackBinding
+--- PASS: TestPKCEDeviceSignatureAndCallbackBinding (0.03s)
+=== RUN   TestModelCatalogAndMultimodalTools
+--- PASS: TestModelCatalogAndMultimodalTools (0.00s)
+=== RUN   TestStopAcrossUnicodeChunks
+--- PASS: TestStopAcrossUnicodeChunks (0.00s)
+=== RUN   TestResponseCustomNamespaceTools
+--- PASS: TestResponseCustomNamespaceTools (0.00s)
+=== RUN   TestPersonalCallbackExchangeAndLegacyRefresh
+--- PASS: TestPersonalCallbackExchangeAndLegacyRefresh (0.04s)
+=== RUN   TestEnterpriseCallbackTrustedIdentity
+--- PASS: TestEnterpriseCallbackTrustedIdentity (0.04s)
+=== RUN   TestCacheUsageAttribution
+--- PASS: TestCacheUsageAttribution (0.02s)
+=== RUN   TestUpstreamErrorsKeepStatusAndMessage
+=== RUN   TestUpstreamErrorsKeepStatusAndMessage/rate_limited
+2026/11/06 22:04:40 upstream failure model=test-model account=acc status=429 code=upstream_rate_limited message=We're sorry, your requests have exceeded the rate limit.
+2026/11/06 22:04:40 upstream failure model=test-model account=acc status=429 code=upstream_rate_limited message=We're sorry, your requests have exceeded the rate limit.
+=== RUN   TestUpstreamErrorsKeepStatusAndMessage/insufficient_quota
+2026/11/06 22:04:40 upstream failure model=test-model account=acc status=403 code=upstream_insufficient_quota message=no quota left
+2026/11/06 22:04:40 upstream failure model=test-model account=acc status=403 code=upstream_insufficient_quota message=no quota left
+=== RUN   TestUpstreamErrorsKeepStatusAndMessage/invalid_request
+2026/11/06 22:04:40 upstream failure model=test-model account=acc status=400 code=upstream_invalid_request message=bad payload
+2026/11/06 22:04:40 upstream failure model=test-model account=acc status=400 code=upstream_invalid_request message=bad payload
+--- PASS: TestUpstreamErrorsKeepStatusAndMessage (0.17s)
+    --- PASS: TestUpstreamErrorsKeepStatusAndMessage/rate_limited (0.06s)
+    --- PASS: TestUpstreamErrorsKeepStatusAndMessage/insufficient_quota (0.06s)
+    --- PASS: TestUpstreamErrorsKeepStatusAndMessage/invalid_request (0.06s)
+=== RUN   TestExpiredTokenMapsTo401
+2026/11/06 22:04:40 upstream failure model=test-model account=acc status=401 code=upstream_authentication_failed message=token expired
+--- PASS: TestExpiredTokenMapsTo401 (0.04s)
+=== RUN   TestStreamAuthErrorRefreshesOnce
+--- PASS: TestStreamAuthErrorRefreshesOnce (0.06s)
+=== RUN   TestFirstEventTimeoutIsReported
+2026/11/06 22:04:40 upstream failure model=test-model account=acc status=502 code=upstream_first_event_timeout message=Upstream request failed
+--- PASS: TestFirstEventTimeoutIsReported (0.63s)
+=== RUN   TestPoolRoundRobinAndQueue
+--- PASS: TestPoolRoundRobinAndQueue (0.09s)
+=== RUN   TestPoolCreditOrderAndMinInterval
+--- PASS: TestPoolCreditOrderAndMinInterval (0.08s)
+=== RUN   TestModelsMergeAcrossAccounts
+--- PASS: TestModelsMergeAcrossAccounts (0.04s)
+=== RUN   TestUpstreamRequestIdentifiesDesktopClient
+--- PASS: TestUpstreamRequestIdentifiesDesktopClient (0.05s)
+PASS
+ok  	trae-relay-web	3.403s

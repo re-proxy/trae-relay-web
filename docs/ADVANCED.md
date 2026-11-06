@@ -9,6 +9,7 @@
 | --- | --- | --- |
 | GET | `/health` | 无认证健康检查 |
 | GET | `/v1/status` | API 认证后的服务状态与并发 |
+| GET | `/v1/balance` | 启用账号池的积分汇总与余额查询状态，见 [余额 API](BALANCE_API.md) |
 | GET | `/v1/models` | 当前账号真实模型目录，应用启用和别名配置 |
 | POST | `/v1/chat/completions` | JSON / SSE，文本、图片、函数工具、多轮、reasoning |
 | POST | `/v1/responses` | JSON / SSE，文本、图片、函数/自定义/namespace 工具、reasoning summary、previous_response_id |

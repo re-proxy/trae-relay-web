@@ -105,6 +105,17 @@ curl http://192.168.1.10:8317/v1/models \
 
 计费倍率直接解析原项目使用的上游 `display_contact_config`：显示基础倍率，以及目录提供的会员、活动和活动会员倍率；闲时活动显示北京时间适用窗口。切换 Max 时展示对应 Max 档位的倍率，没有数据时显示“上游未提供”，不会按 0 或普通档位价格处理。会员/活动价格需满足上游条件，本页不推算当前账号一定享有的折扣或实际费用。刷新模型目录可同步最新目录倍率。
 
+## 给下游 router 查询余额
+
+使用与聊天相同的 API Key 调用 `GET /v1/balance`，读取 `balance`（单位 `credits`，个人积分合计），并检查 `complete`。支持 Bearer / X-API-Key，默认缓存 60 秒；部分查询失败会标记不完整，未知余额返回 `null`，企业套餐额度单列、不当作剩余积分合计。
+
+```sh
+curl http://192.168.1.10:8317/v1/balance \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+这是自定义余额接口，router 需配置对应查询地址、JSON 字段与积分单位，不能把积分当成美元。响应字段、错误状态和接入示例见 [下游余额 API](docs/BALANCE_API.md)。
+
 ## 数据与升级
 
 账号凭据、API Key、模型设置和最近 500 条使用记录加密保存在 Docker 的 `relay-data` volume。请分别备份 **数据 volume** 与 **原 `.env`**；重新生成主密钥后，已有数据将无法解密。
