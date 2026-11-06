@@ -149,7 +149,7 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(b)
 		return
 	}
-	if r.URL.Path == "/app.js" || r.URL.Path == "/style.css" {
+	if r.URL.Path == "/app.js" || r.URL.Path == "/auto-refresh.js" || r.URL.Path == "/style.css" {
 		b, e := assets.ReadFile("web" + r.URL.Path)
 		if e != nil {
 			http.NotFound(w, r)

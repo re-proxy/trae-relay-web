@@ -9,6 +9,7 @@ const PAGES=[
 ];
 const PAGE_ALIAS={'/accounts':'/','/access':'/keys'};
 let S=null,attempt='',authorization=null,pinnedKey='';
+let sessionVersion=0,interactionDepth=0,uiRevision=0,lastStateUpdate=0,lastBalanceAttempt=0,statePollError='',balancePollError='';
 
 function currentPage(){const p=PAGE_ALIAS[location.pathname]||location.pathname;return PAGES.find(x=>x.path===p)||PAGES[0];}
 function endpoint(){return location.origin+'/v1';}
@@ -19,15 +20,42 @@ function clock(iso){return iso?new Date(iso).toLocaleString():'';}
 function localDay(){const d=new Date();return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');}
 function checkinLabel(a){if(a.checkin_day!==localDay())return {text:'今日未签到',cls:''};switch(a.checkin_result){case 0:return {text:'今日已签到，积分已入账',cls:'green'};case 1:return {text:'今日已签到',cls:'green'};case -2:return {text:'账号不支持签到',cls:''};case -3:return {text:'已提交，积分确认中',cls:''};default:return {text:'签到失败，稍后重试',cls:'warn'};}}
 
-async function api(path,body){const res=await fetch('/admin/'+path,{method:body===undefined?'GET':'POST',headers:body===undefined?{}:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),credentials:'same-origin'});const data=await res.json().catch(()=>({}));if(!res.ok){if(res.status===401)showLogin();throw Error(data.error?.message||'请求失败');}return data;}
-async function action(fn){try{await fn();}catch(e){notice(e.message);}}
+async function api(path,body,signal){const res=await fetch('/admin/'+path,{method:body===undefined?'GET':'POST',headers:body===undefined?{}:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),credentials:'same-origin',signal});const data=await res.json().catch(()=>({}));if(!res.ok){if(res.status===401)showLogin();throw Error(data.error?.message||'请求失败');}return data;}
+async function action(fn){interactionDepth++;uiRevision++;try{await fn();}catch(e){notice(e.message);}finally{interactionDepth--;if(S&&!document.hidden)poller.wake();}}
 function button(text,fn,cls){const b=el('button',text,cls);b.onclick=()=>action(async()=>{b.disabled=true;try{await fn();}finally{b.disabled=false;}});return b;}
 function link(text,path){const a=el('a',text);a.href=path;a.onclick=go;return a;}
 
 function go(event){const a=event.currentTarget;if(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();if(a.pathname===location.pathname){render();return;}history.pushState({},'',a.pathname);render();}
 
-function showLogin(){S=null;attempt='';authorization=null;pinnedKey='';const p=$('password'),c=$('callback');if(p)p.value='';if(c)c.value='';render();}
-async function refresh(){S=await api('state');render();}
+function showLogin(){sessionVersion++;poller.stop();lastBalanceAttempt=0;statePollError='';balancePollError='';modelDrafts.clear();modelExpanded.clear();S=null;attempt='';authorization=null;pinnedKey='';const p=$('password'),c=$('callback');if(p)p.value='';if(c)c.value='';render();}
+async function refresh(){const version=sessionVersion;const next=await api('state');if(version!==sessionVersion)return;S=next;lastStateUpdate=Date.now();statePollError='';render();if(!document.hidden)poller.start();}
+
+/* ---------- automatic refresh ---------- */
+function canAutoRender(){
+const content=$('content');
+const page=currentPage().id;
+if((page==='accounts'&&authorization)||(page==='keys'&&pinnedKey)||(page==='models'&&modelDrafts.size)||interactionDepth||content.contains(document.activeElement))return false;
+return !Array.from(content.querySelectorAll('.keyForm input')).some(input=>input.value.trim());
+}
+function pageData(state,page){if(page==='accounts')return [state.accounts,state.checkin_enabled,state.checkin_at];if(page==='models')return [state.models,state.settings];if(page==='keys')return state.keys;return state.usage;}
+async function autoRefresh(signal){
+const version=sessionVersion,revision=uiRevision;
+if(S.accounts.some(account=>account.enabled)&&Date.now()-lastBalanceAttempt>=60000){
+lastBalanceAttempt=Date.now();
+try{const result=await api('balance/refresh',{},signal);lastBalanceAttempt=balanceCheckedAt(result);balancePollError=result.complete?'':'部分账号余额未提供，查看账号详情';}
+catch(error){if(signal.aborted)throw error;balancePollError='余额更新失败：'+error.message;}
+}
+const next=await api('state',undefined,signal);
+if(signal.aborted||version!==sessionVersion||revision!==uiRevision||!S)return;
+const page=currentPage().id,changed=JSON.stringify(pageData(S,page))!==JSON.stringify(pageData(next,page));
+S=next;lastStateUpdate=Date.now();statePollError='';
+if(changed&&canAutoRender())render();else renderService();
+}
+const poller=new ConsolePoller({enabled:()=>!!S&&!document.hidden&&!interactionDepth,run:autoRefresh,onError:error=>{if(S){statePollError='信息更新失败：'+error.message;renderService();}}});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)poller.stop();else if(S)poller.wake();});
+window.addEventListener('online',()=>{if(S&&!document.hidden)poller.wake();});
+window.addEventListener('pagehide',()=>poller.stop());
+window.addEventListener('pageshow',()=>{if(S&&!document.hidden)poller.wake();});
 
 /* ---------- page furniture ---------- */
 function pageHead(page,extra,actions){const head=el('header',undefined,'pageHead'),title=el('div');title.append(el('h1',page.label),el('p',page.desc+(extra?' · '+extra:'')));const box=el('div',undefined,'pageActions');for(const a of actions)box.append(a);head.append(title,box);return head;}
@@ -81,6 +109,7 @@ box.append(form);return box;
 
 /* ---------- models ---------- */
 const modelDrafts=new Map();
+const modelView={q:'',filter:'all'};
 const modelExpanded=new Set();
 function rateText(v){return typeof v==='number'&&Number.isFinite(v)&&v>=0?v.toLocaleString(undefined,{maximumFractionDigits:6})+'×':null;}
 function rateWindow(w){
@@ -117,15 +146,15 @@ const refreshCatalog=async()=>{notice('正在请求上游模型目录…');await
 root.append(pageHead(page,s.models.length?s.models.length+' 个可选':'',[button('刷新',refresh),button('刷新模型目录',refreshCatalog,'primary')]));
 if(!s.models.length){root.append(emptyBox('模型目录还没有加载','模型清单来自启用账号的实时上游目录，未加载前不会提供虚构模型。',['确认至少一个账号已启用','点击「刷新模型目录」向上游读取','读取失败会保留上次成功的目录']));return root;}
 
-const view={q:'',filter:'all'};
+const view=modelView;
 const bar=el('div',undefined,'toolbar');
-const search=el('input');search.type='search';search.placeholder='搜索名称、ID 或提供方';search.setAttribute('aria-label','搜索模型');
+const search=el('input');search.type='search';search.placeholder='搜索名称、ID 或提供方';search.setAttribute('aria-label','搜索模型');search.value=view.q;
 const filter=el('select');filter.setAttribute('aria-label','筛选模型');
 for(const [value,label] of [['all','全部模型'],['enabled','已启用'],['vision','图片'],['reasoning','思考'],['max','Max']]){const o=el('option',label);o.value=value;filter.append(o);}
 const count=el('span','','count');
 search.oninput=()=>{view.q=search.value.trim().toLowerCase();paint();};
 filter.onchange=()=>{view.filter=filter.value;paint();};
-bar.append(search,filter,count);
+filter.value=view.filter;bar.append(search,filter,count);
 root.append(bar,el('p','倍率是上游目录给出的计费基数，不是每百万 token 的货币价格。','fine'));
 
 const grid=el('section',undefined,'mGrid');
@@ -167,9 +196,11 @@ fields.append(aliasField,effortField);
 
 const maxLabel=el('label',undefined,'switch'+(m.max?'':' off')),maxBox=el('input');maxBox.type='checkbox';maxBox.checked=st.max;maxBox.disabled=!m.max;maxBox.setAttribute('aria-label',m.display_name+' Max 模式');maxLabel.append(maxBox,el('span','Max 模式'));
 const bottom=el('div',undefined,'mBottom'),hint=el('span',initialDirty?'未保存':'','draft');const save=button('保存偏好',async()=>{
-await api('model',{id:m.id,setting:{disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:maxBox.checked}});
-modelDrafts.delete(m.id);
-s.settings={...s.settings,[m.id]:{disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:maxBox.checked}};
+const saved={disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:maxBox.checked};
+await api('model',{id:m.id,setting:saved});
+s.settings={...s.settings,[m.id]:saved};if(S&&S!==s)S.settings={...S.settings,[m.id]:saved};
+const edited={disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:maxBox.checked};
+if(Object.keys(saved).some(key=>saved[key]!==edited[key]))modelDrafts.set(m.id,edited);else modelDrafts.delete(m.id);
 notice('已保存 '+m.display_name+' 的偏好');paint();
 });
 save.disabled=!initialDirty;
@@ -252,6 +283,8 @@ if(!S){box.append(el('p','登录后显示进行中请求与账号数量。','svc
 const dl=el('dl',undefined,'svc');
 for(const [k,v] of [['进行中',S.in_flight],['启用账号',S.accounts.filter(a=>a.enabled).length],['可选模型',S.models.length],['API Key',S.keys.length]]){const d=el('div');d.append(el('dt',k),el('dd',String(v)));dl.append(d);}
 box.append(dl);
+const state=statePollError||balancePollError;
+const auto=el('div',undefined,'autoRefreshStatus');auto.setAttribute('role','status');auto.append(el('span','自动更新 · 信息 15 秒 / 余额 60 秒'),el('small',state||('最近更新 '+(lastStateUpdate?new Date(lastStateUpdate).toLocaleTimeString():'等待中'))));if(state)auto.classList.add('warn');box.append(auto);
 }
 
 function render(){
@@ -274,4 +307,4 @@ $('footerURL').textContent=location.origin;$('footerURL').title=location.origin;
 window.addEventListener('popstate',()=>render());
 render();
 $('login').hidden=false;
-api('state').then(s=>{S=s;render();}).catch(()=>{});
+refresh().catch(()=>{});

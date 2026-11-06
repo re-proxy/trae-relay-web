@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -184,5 +185,56 @@ func TestBalanceAPIConcurrentPollsCoalesce(t *testing.T) {
 	wg.Wait()
 	if calls.Load() != 1 {
 		t.Fatal("concurrent polls not coalesced", calls.Load())
+	}
+}
+
+func TestAdminBalanceRefreshAndCancellation(t *testing.T) {
+	a := testApp(t)
+	seed(t, a)
+	cookie := adminCookie(t, a)
+	if w := request(a, "POST", "/admin/balance/refresh", M{}, a.store.apiKey(), nil); w.Code != 401 {
+		t.Fatal("API key grants admin refresh")
+	}
+	acc, _ := a.store.find("acc")
+	old := M{"ok": true, "remaining": float64(17), "checked_at": time.Now()}
+	acc.Balance = old
+	_ = a.store.putAccount(acc)
+	fixture(t, a, func(w http.ResponseWriter, r *http.Request) { t.Error("fresh cache queried upstream") })
+	if w := request(a, "POST", "/admin/balance/refresh", M{}, "", cookie); w.Code != 200 || !strings.Contains(w.Body.String(), `"cached":true`) {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	// Hiding a browser cancels its poll; this must not poison the stored balance.
+	acc.Balance = M{"ok": true, "remaining": float64(17), "checked_at": time.Now().Add(-2 * time.Minute)}
+	_ = a.store.putAccount(acc)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	defer close(release)
+	fixture(t, a, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		close(entered)
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	r := httptest.NewRequest("GET", "/v1/balance", nil).WithContext(ctx)
+	r.Header.Set("Authorization", "Bearer "+a.store.apiKey())
+	done := make(chan struct{})
+	go func() { a.handler().ServeHTTP(httptest.NewRecorder(), r); close(done) }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("query did not start")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("cancelled query did not stop")
+	}
+	saved, _ := a.store.find("acc")
+	if saved.Balance["ok"] != true || number(saved.Balance, "remaining", 0) != 17 {
+		t.Fatal("cancelled poll replaced prior balance", saved.Balance)
 	}
 }

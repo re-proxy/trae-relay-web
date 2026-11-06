@@ -128,3 +128,9 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o relay-linux-amd64 .
 | `/admin/key` | `{"action":"disable","id":"密钥 ID"}` | 另支持 enable、delete；rename 还需 name |
 
 诊断接口以 `ok` 字段标识查询是否成功，并附检查时间。HTTP 200 本身不表示账号验证成功。余额与诊断结果保存在加密状态中。个人余额移植自原项目 `ide_user_ent_usage`：优先 usage_summary，其次积分事件，最后有效权益包；企业只显示官方 plan_attribute 套餐额度，不推算剩余金额。未使用真实账号实测。
+
+## Web UI 定时刷新
+
+管理会话下的 `POST /admin/balance/refresh` 复用 `/v1/balance` 的缓存、刷新门和并发限制；仍需管理 Cookie、JSON 请求和同源 Origin，普通 API Key 不具备管理权限。用于可见页面的余额自动查询，响应语义与池余额 API 相同。
+
+前端单一轮询循环：状态间隔 15 秒，余额约 60 秒，慢请求顺延且不重叠；单轮超时 45 秒。隐藏页面/退出登录取消请求，恢复可见或网络恢复后立即刷新。取消的余额查询不会用失败结果覆盖此前状态。生产部署无 Node 依赖；开发时可用 `node --test scripts/auto-refresh.test.cjs` 检查轮询调度。

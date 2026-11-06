@@ -110,6 +110,9 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 		a.accountInspect(w, r, false)
 	case r.URL.Path == "/admin/account/balance" && r.Method == "POST":
 		a.accountInspect(w, r, true)
+	case r.URL.Path == "/admin/balance/refresh" && r.Method == "POST":
+		// Reuse the pool cache/refresh gate behind the management session boundary.
+		a.balanceAPI(w, r)
 	case r.URL.Path == "/admin/account/checkin" && r.Method == "POST":
 		a.manageCheckin(w, r)
 	case r.URL.Path == "/admin/key" && r.Method == "POST":

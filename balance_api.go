@@ -57,6 +57,9 @@ func (a *App) readAccountBalance(ctx context.Context, acc Account) AccountBalanc
 		if e == nil {
 			value, e = a.queryBalance(call, fresh)
 		}
+		if ctx.Err() != nil {
+			return AccountBalance{AccountID: acc.ID, Kind: "unknown", Error: "balance_query_cancelled"}
+		}
 		if value == nil {
 			value = M{}
 		}
