@@ -10,19 +10,21 @@ import (
 )
 
 type Model struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"display_name"`
-	ModelName     string   `json:"model_name"`
-	MaxModel      string   `json:"max_model_name,omitempty"`
-	Function      string   `json:"function"`
-	Provider      string   `json:"provider"`
-	Source        int      `json:"config_source"`
-	Max           bool     `json:"max"`
-	Vision        bool     `json:"vision"`
-	Efforts       []string `json:"efforts"`
-	DefaultEffort string   `json:"default_effort"`
-	Context       int64    `json:"context"`
-	MaxContext    int64    `json:"max_context"`
+	ID            string        `json:"id"`
+	Name          string        `json:"display_name"`
+	ModelName     string        `json:"model_name"`
+	MaxModel      string        `json:"max_model_name,omitempty"`
+	Function      string        `json:"function"`
+	Provider      string        `json:"provider"`
+	Source        int           `json:"config_source"`
+	Max           bool          `json:"max"`
+	Vision        bool          `json:"vision"`
+	Efforts       []string      `json:"efforts"`
+	DefaultEffort string        `json:"default_effort"`
+	Context       int64         `json:"context"`
+	MaxContext    int64         `json:"max_context"`
+	Pricing       *ModelPricing `json:"pricing,omitempty"`
+	MaxPricing    *ModelPricing `json:"max_pricing,omitempty"`
 }
 
 func internalModel(id string) bool {
@@ -80,6 +82,9 @@ func parseCatalog(root M, function string) []Model {
 			if strings.HasSuffix(model.ModelName, "__max") || boolean(obj(detail), "max_mode", false) {
 				model.MaxModel = model.ModelName
 				model.Max = true
+				model.MaxPricing = parseModelPricing(c, obj(detail))
+			} else {
+				model.Pricing = parseModelPricing(c, obj(detail))
 			}
 			features := obj(m["features"])
 			if raw, ok := m["features"].(string); ok {
@@ -189,6 +194,15 @@ func mergeModels(all []Model) []Model {
 				if strings.Contains(m.ModelName, "__dev") {
 					d.ModelName = m.ModelName
 					d.Function = m.Function
+					if m.Pricing != nil {
+						d.Pricing = m.Pricing
+					}
+				}
+				if d.Pricing == nil {
+					d.Pricing = m.Pricing
+				}
+				if d.MaxPricing == nil {
+					d.MaxPricing = m.MaxPricing
 				}
 				if m.MaxContext > d.MaxContext {
 					d.MaxContext = m.MaxContext

@@ -17,8 +17,7 @@ const bal=a.balance;balance.append(el('small',a.scope==='saas'?'套餐额度 / C
 const actions=el('div',undefined,'actions');if(a.scope!=='saas'){actions.append(button('立即签到',async()=>{const r=await api('account/checkin',{id:a.id});notice(r.message||('签到结果 '+r.result));await refresh();}),button(a.checkin_off?'开启自动签到':'关闭自动签到',async()=>{await api('account/checkin',{id:a.id,action:'auto',enabled:!!a.checkin_off});await refresh();}));}
 actions.append(button('验证连通性',async()=>{const result=await api('account/check',{id:a.id});notice(result.ok?'身份和模型目录验证通过（未发送生成请求）':'验证失败：'+result.error);await refresh();}),button('查询余额',async()=>{const result=await api('account/balance',{id:a.id});notice(result.ok?'余额信息已更新':'查询失败：'+result.error);await refresh();}),button(a.enabled?'停用':'启用',async()=>{await api('account',{id:a.id,action:a.enabled?'disable':'enable'});await refresh();}),button('重命名',async()=>{const name=prompt('账号名称',a.name);if(name){await api('account',{id:a.id,action:'rename',name});await refresh();}}),button('删除',async()=>{if(confirm('删除此账号的加密凭据？')){await api('account',{id:a.id,action:'delete'});await refresh();}}));card.append(actions);accounts.append(card);}
 const keyList=$('keyList');keyList.replaceChildren();if(!s.keys.length)keyList.append(el('p','尚无访问密钥，创建一个以连接客户端。'));for(const k of s.keys){const row=el('div',undefined,'row'),info=el('div'),actions=el('div',undefined,'actions');info.append(el('strong',k.name),el('code','••••••'+k.suffix),el('span',k.enabled?'可用':'已停用',k.enabled?'pill active':'pill'));actions.append(button(k.enabled?'停用':'启用',async()=>{await api('key',{id:k.id,action:k.enabled?'disable':'enable'});await refresh();}),button('重命名',async()=>{const name=prompt('密钥名称',k.name);if(name){await api('key',{id:k.id,action:'rename',name});await refresh();}}),button('撤销',async()=>{if(confirm('撤销该密钥？使用它的客户端将失去访问权限。')){await api('key',{id:k.id,action:'delete'});await refresh();}}));row.append(info,actions);keyList.append(row);}
-const models=$('modelList');models.replaceChildren();if(!s.models.length)models.append(el('p','启用账号后点击“刷新模型目录”。未加载目录前不会提供虚构模型。'));
-for(const m of s.models){const st=s.settings[m.id]||{},row=el('div',undefined,'modelGrid'),desc=el('div');desc.append(el('strong',m.display_name),el('small',m.id+' · '+m.function+(m.vision?' · 图片':'')));const alias=el('input');alias.value=st.alias||'';alias.placeholder='API 模型别名';alias.setAttribute('aria-label',m.id+' 别名');const effort=el('select');effort.setAttribute('aria-label',m.id+' 思考档位');const def=el('option','跟随上游默认');def.value='';effort.append(def);for(const e of m.efforts||[]){const opt=el('option',e);opt.value=e;effort.append(opt);}effort.value=st.effort||'';const checks=el('div',undefined,'checks'),enabled=el('input'),max=el('input');enabled.type='checkbox';enabled.checked=!st.disabled;max.type='checkbox';max.checked=!!st.max;max.disabled=!m.max;const enableLabel=el('label','启用'),maxLabel=el('label','Max');enableLabel.prepend(enabled);maxLabel.prepend(max);checks.append(enableLabel,maxLabel);const prefs=el('div');prefs.append(effort,checks);row.append(desc,alias,prefs,button('保存',async()=>{await api('model',{id:m.id,setting:{disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:max.checked}});notice('模型设置已保存');}));models.append(row);}
+renderModels(s);
 const usage=$('usageList');usage.replaceChildren();for(const u of [...s.usage].reverse()){const tr=el('tr'),t=u.tokens||{};for(const v of [new Date(u.time).toLocaleString(),u.model,t.prompt_tokens??'—',t.completion_tokens??'—',t.prompt_tokens_details?.cached_tokens??'—',u.success?'成功':'失败 / 取消',u.duration_ms+' ms'])tr.append(el('td',String(v)));usage.append(tr);}}
 $('loginForm').onsubmit=e=>{e.preventDefault();action(async()=>{await api('login',{password:$('password').value});$('password').value='';$('notice').hidden=true;await refresh();});};
 $('logout').onclick=()=>action(async()=>{await api('logout',{});location.reload();});$('refreshState').onclick=()=>action(refresh);
@@ -29,4 +28,40 @@ $('keyForm').onsubmit=e=>{e.preventDefault();action(async()=>{const button=$('ke
 $('footerURL').textContent=endpoint().replace(/\/v1$/,'');
 $('footerURL').title=location.origin;
 $('baseURL').onclick=async()=>{try{await navigator.clipboard.writeText(endpoint());notice('BASE URL 已复制：'+endpoint());}catch{notice('复制失败，请手动选择 BASE URL');}};
+
+
+let modelState=null;
+const modelDrafts=new Map();
+const rateValue=v=>typeof v==='number'&&Number.isFinite(v)&&v>=0?v.toLocaleString(undefined,{maximumFractionDigits:6})+'×':null;
+function rateWindow(w){const clock=n=>String(Math.floor(n/60)).padStart(2,'0')+':'+String(n%60).padStart(2,'0');const days=['','一','二','三','四','五','六','日'];return (w.weekdays?.length?'周'+w.weekdays.map(d=>days[d]).join('、'):'每天')+' '+clock(w.start_minute)+'–'+clock(w.end_minute);}
+function pricingPanel(m,max){
+const panel=el('div',undefined,'modelPricing'),p=max?m.max_pricing:m.pricing,main=el('div',undefined,'rateMain');main.append(el('span',max?'MAX 基础倍率':'基础倍率'),el('strong',rateValue(p?.standard_rate)||'—'));panel.append(main);
+const details=el('div',undefined,'rateDetails');
+if(!p){details.append(el('span',max?'上游未提供 Max 计费倍率':'上游未提供计费倍率','rateUnknown'));}
+else{
+if(p.standard_rate===undefined)details.append(el('span','基础倍率未提供','rateUnknown'));
+for(const [label,value] of [['会员',p.member_rate],[p.activity_type==='off_peak'?'闲时活动':'活动',p.activity_rate],['活动会员',p.activity_member_rate]]){const formatted=rateValue(value);if(formatted){const item=el('div');item.append(el('span',label),el('strong',formatted));details.append(item);}}
+if(!details.childNodes.length)details.append(el('span','上游目录标准倍率','rateUnknown'));
+if(p.off_peak_windows?.length){const conditions=el('small','闲时条件 · 北京时间 '+p.off_peak_windows.map(rateWindow).join(' / '),'rateConditions');details.append(conditions);}
+else if(p.activity_rate!==undefined)details.append(el('small',p.activity_type==='off_peak'?'闲时条件未提供，生效情况以上游为准':'活动资格与有效期以上游为准','rateConditions'));
+}
+panel.append(details);return panel;
+}
+function renderModels(state){
+modelState=state;const list=$('modelList');list.replaceChildren();const query=$('modelSearch').value.trim().toLowerCase(),filter=$('modelFilter').value;
+const visible=state.models.filter(m=>{const st=modelDrafts.get(m.id)||state.settings[m.id]||{};return [m.display_name,m.id,m.provider].join(' ').toLowerCase().includes(query)&&(filter==='all'||filter==='enabled'&&!st.disabled||filter==='vision'&&m.vision||filter==='reasoning'&&m.efforts?.length||filter==='max'&&m.max);});
+$('modelResults').textContent=visible.length+' / '+state.models.length+' 个模型';
+if(!visible.length){const empty=el('div',undefined,'modelEmpty');empty.append(el('span','◇'),el('strong',state.models.length?'没有匹配的模型':'模型目录尚未加载'),el('p',state.models.length?'试试其他关键词或筛选条件。':'启用账号后刷新目录，即可查看可用模型、计费倍率和能力。'));list.append(empty);return;}
+for(const m of visible){
+const st=modelDrafts.get(m.id)||state.settings[m.id]||{},card=el('article',undefined,'modelCard'+(st.disabled?' isDisabled':'')),head=el('div',undefined,'modelCardHead'),title=el('div',undefined,'modelTitle');title.append(el('small',m.provider||'TRAE · 内置模型'),el('h3',m.display_name),el('code',m.id));
+const toggle=el('label',undefined,'modelToggle'),enabled=el('input');enabled.type='checkbox';enabled.checked=!st.disabled;enabled.setAttribute('aria-label',m.id+' 启用');const toggleText=el('span',enabled.checked?'已启用':'已停用');toggle.append(enabled,toggleText);head.append(title,toggle);card.append(head);
+const tags=el('div',undefined,'modelTags');if(m.vision)tags.append(el('span','图片输入'));if(m.efforts?.length)tags.append(el('span','思考'));if(m.max)tags.append(el('span','Max'));if(m.context)tags.append(el('span',new Intl.NumberFormat('en',{notation:'compact',maximumFractionDigits:1}).format(m.context)+' 上下文'));if(!tags.childNodes.length)tags.append(el('span','文本'));card.append(tags);
+let price=pricingPanel(m,!!st.max);card.append(price);
+const form=el('div',undefined,'modelFields'),aliasLabel=el('label','API 别名'),alias=el('input');alias.value=st.alias||'';alias.placeholder=m.id;alias.setAttribute('aria-label',m.id+' 别名');aliasLabel.append(alias);
+const effortLabel=el('label','思考档位'),effort=el('select');effort.setAttribute('aria-label',m.id+' 思考档位');const def=el('option',m.default_effort?'默认 · '+m.default_effort:'跟随上游默认');def.value='';effort.append(def);for(const e of m.efforts||[]){const option=el('option',e);option.value=e;effort.append(option);}effort.value=st.effort||'';effort.disabled=!m.efforts?.length;effortLabel.append(effort);form.append(aliasLabel,effortLabel);card.append(form);
+const bottom=el('div',undefined,'modelCardBottom'),maxLabel=el('label',undefined,'modelMax'),max=el('input');max.type='checkbox';max.checked=!!st.max;max.disabled=!m.max;max.setAttribute('aria-label',m.id+' Max 模式');maxLabel.append(max,el('span',m.max?'Max 模式':'不支持 Max'));const saveGroup=el('div',undefined,'modelSaveGroup'),dirty=el('small',modelDrafts.has(m.id)?'未保存':'');const save=button('保存偏好',async()=>{const snapshot={disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:max.checked};await api('model',{id:m.id,setting:snapshot});state.settings[m.id]=snapshot;modelDrafts.delete(m.id);dirty.textContent='已保存';notice(m.display_name+' 的偏好已保存');});saveGroup.append(dirty,save);bottom.append(maxLabel,saveGroup);card.append(bottom);
+const changed=()=>{modelDrafts.set(m.id,{disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:max.checked});dirty.textContent='未保存';toggleText.textContent=enabled.checked?'已启用':'已停用';card.classList.toggle('isDisabled',!enabled.checked);};alias.oninput=changed;effort.onchange=changed;enabled.onchange=changed;max.onchange=()=>{changed();const next=pricingPanel(m,max.checked);price.replaceWith(next);price=next;};list.append(card);
+}}
+$('modelSearch').oninput=()=>{if(modelState)renderModels(modelState);};$('modelFilter').onchange=()=>{if(modelState)renderModels(modelState);};
+
 refresh().catch(()=>{});
