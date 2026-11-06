@@ -23,6 +23,18 @@ import (
 //go:embed web/*
 var assets embed.FS
 
+// consolePages are the management pages served by the embedded console. Each one
+// keeps its own address so a link can be shared and a reload lands on the same
+// page; the browser renders the view that matches the path.
+var consolePages = map[string]bool{
+	"/":         true,
+	"/accounts": true,
+	"/models":   true,
+	"/keys":     true,
+	"/access":   true,
+	"/usage":    true,
+}
+
 type Config struct {
 	Addr, DataDir, AdminPassword, MasterKey, Version, VersionCode string
 	Concurrency                                                   int
@@ -129,7 +141,7 @@ func (a *App) serve(w http.ResponseWriter, r *http.Request) {
 		a.admin(w, r)
 		return
 	}
-	if r.URL.Path == "/" && r.Method == "GET" {
+	if consolePages[r.URL.Path] && r.Method == "GET" {
 		b, _ := assets.ReadFile("web/index.html")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
