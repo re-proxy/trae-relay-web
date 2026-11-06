@@ -81,6 +81,7 @@ box.append(form);return box;
 
 /* ---------- models ---------- */
 const modelDrafts=new Map();
+const modelExpanded=new Set();
 function rateText(v){return typeof v==='number'&&Number.isFinite(v)&&v>=0?v.toLocaleString(undefined,{maximumFractionDigits:6})+'×':null;}
 function rateWindow(w){
 if(!w)return '';
@@ -144,34 +145,37 @@ for(const m of shown)grid.append(modelCard(m));
 }
 function modelCard(m){
 const draft=modelDrafts.get(m.id)||snapshot(m),st=draft;
+const original=snapshot(m),initialDirty=['disabled','alias','effort','max'].some(k=>st[k]!==original[k]);
 const card=el('article',undefined,st.disabled?'mCard off':'mCard');
 const head=el('div',undefined,'mHead'),title=el('div',undefined,'mTitle');
 title.append(el('small',(m.provider||'上游目录')+' · '+m.function),el('h3',m.display_name),el('code',m.id));
 const enabled=el('input');enabled.type='checkbox';enabled.checked=!st.disabled;enabled.setAttribute('aria-label',m.display_name+' 启用');
 const toggle=el('label',undefined,'switch');toggle.append(enabled,el('span',st.disabled?'已停用':'启用'));
-head.append(title,toggle);
+head.append(title);
 const tags=el('div',undefined,'tags');
 tags.append(el('span',st.max&&m.max?'Max':'标准','tag'+(st.max&&m.max?' on':'')));
 if(m.vision)tags.append(el('span','图片','tag'));
 if(m.efforts&&m.efforts.length)tags.append(el('span','思考 · '+(st.effort||m.default_effort||'默认'),'tag'));
 if(m.context)tags.append(el('span',Math.round(m.context/1000)+'K 上下文','tag'));
-card.append(head,tags,pricingPanel(m,st.max&&m.max));
+title.append(tags);card.append(head,pricingPanel(m,st.max&&m.max));
 
 const fields=el('div',undefined,'mFields');
 const aliasField=el('label'),alias=el('input');alias.value=st.alias;alias.placeholder='客户端请求名，例如 gpt-4o';alias.setAttribute('aria-label',m.display_name+' 别名');aliasField.append(el('span','API 别名'),alias);
 const effortField=el('label'),effort=el('select');effort.setAttribute('aria-label',m.display_name+' 思考档位');const def=el('option','跟随默认');def.value='';effort.append(def);for(const e of m.efforts||[]){const o=el('option',e);o.value=e;effort.append(o);}effort.value=st.effort;effortField.append(el('span','思考档位'),effort);
 fields.append(aliasField,effortField);
-card.append(fields);
+
 
 const maxLabel=el('label',undefined,'switch'+(m.max?'':' off')),maxBox=el('input');maxBox.type='checkbox';maxBox.checked=st.max;maxBox.disabled=!m.max;maxBox.setAttribute('aria-label',m.display_name+' Max 模式');maxLabel.append(maxBox,el('span','Max 模式'));
-const bottom=el('div',undefined,'mBottom'),hint=el('span',st.dirty?'有未保存的修改':'','draft');const save=button('保存偏好',async()=>{
+const bottom=el('div',undefined,'mBottom'),hint=el('span',initialDirty?'未保存':'','draft');const save=button('保存偏好',async()=>{
 await api('model',{id:m.id,setting:{disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:maxBox.checked}});
 modelDrafts.delete(m.id);
 s.settings={...s.settings,[m.id]:{disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:maxBox.checked}};
 notice('已保存 '+m.display_name+' 的偏好');paint();
 });
-save.disabled=!st.dirty;
-bottom.append(maxLabel,hint,save);
+save.disabled=!initialDirty;
+const editor=el('div',undefined,'mEditor');editor.id='model-editor-'+encodeURIComponent(m.id);editor.hidden=!modelExpanded.has(m.id);editor.append(fields,maxLabel);
+const expand=el('button',editor.hidden?'偏好 ▾':'收起 ▴');expand.type='button';expand.setAttribute('aria-label',m.display_name+' 偏好');expand.setAttribute('aria-controls',editor.id);expand.setAttribute('aria-expanded',String(!editor.hidden));expand.onclick=()=>{editor.hidden=!editor.hidden;if(editor.hidden)modelExpanded.delete(m.id);else modelExpanded.add(m.id);expand.textContent=editor.hidden?'偏好 ▾':'收起 ▴';expand.setAttribute('aria-expanded',String(!editor.hidden));};
+bottom.append(toggle,hint,save,expand);
 
 const touch=()=>{
 const base=snapshot(m),next={disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:maxBox.checked};
@@ -179,7 +183,7 @@ const dirty=next.disabled!==base.disabled||next.alias!==base.alias||next.effort!
 if(dirty)modelDrafts.set(m.id,next);else modelDrafts.delete(m.id);
 toggle.lastChild.textContent=next.disabled?'已停用':'启用';
 card.className=next.disabled?'mCard off':'mCard';
-hint.textContent=dirty?'有未保存的修改':'';
+hint.textContent=dirty?'未保存':'';
 save.disabled=!dirty;
 paint2(m,next,tags,card);
 };
@@ -189,7 +193,7 @@ tagsNode.firstChild.textContent=next.max&&m.max?'Max':'标准';
 const old=cardNode.querySelector('.rates');if(old)old.replaceWith(pricingPanel(m,next.max&&m.max));
 }
 enabled.onchange=touch;maxBox.onchange=touch;alias.oninput=touch;effort.onchange=touch;
-card.append(bottom);
+card.append(bottom,editor);
 return card;
 }
 paint();
