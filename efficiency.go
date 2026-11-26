@@ -209,12 +209,18 @@ func (snapshot benchmarkScores) match(model Model, max bool, effort string, alia
 		}
 		if effort != "" {
 			suffix := "-" + benchmarkName(effort)
-			if !strings.HasSuffix(candidate, suffix) {
-				candidate += suffix
+			effortCandidate := candidate
+			if !strings.HasSuffix(effortCandidate, suffix) {
+				effortCandidate += suffix
+			}
+			if row, found := snapshot.byName[effortCandidate]; found && row != nil {
+				return row
 			}
 		}
 		if row, found := snapshot.byName[candidate]; found {
-			return row
+			if row != nil {
+				return row
+			}
 		}
 	}
 	return nil

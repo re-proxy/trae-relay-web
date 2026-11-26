@@ -158,3 +158,21 @@ func TestModelEfficiencyReordersAtOffPeakBoundary(t *testing.T) {
 		t.Fatalf("wrong ranking in the off-peak window: %+v", after)
 	}
 }
+
+func TestBenchmarkMatchFallsBackToGenericScoreAfterEffortSpecific(t *testing.T) {
+	generic := &benchmarkModel{ID: "generic"}
+	exact := &benchmarkModel{ID: "high"}
+	snapshot := benchmarkScores{byName: map[string]*benchmarkModel{
+		"model":      generic,
+		"model-high": exact,
+	}}
+	model := Model{ID: "model", ModelName: "model__dev"}
+
+	if got := snapshot.match(model, false, "high", nil); got != exact {
+		t.Fatalf("expected effort-specific score, got %+v", got)
+	}
+	delete(snapshot.byName, "model-high")
+	if got := snapshot.match(model, false, "high", nil); got != generic {
+		t.Fatalf("expected generic score fallback, got %+v", got)
+	}
+}
