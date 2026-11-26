@@ -23,30 +23,14 @@ func TestModelEfficiencyUsesTaskTokensAndTraeRates(t *testing.T) {
 	a.store.state.Models["compact"] = ModelSetting{Max: true, Effort: "high"}
 	a.store.state.Models["disabled"] = ModelSetting{Disabled: true}
 	fixture(t, a, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/functions/v1/leaderboard-read" {
-			var body M
-			if r.Method != "POST" || r.Header.Get("x-api-key") != "" || r.Header.Get("Authorization") != "" ||
-				json.NewDecoder(r.Body).Decode(&body) != nil || body["package"] != "terminal-bench/terminal-bench" || body["name"] != "4-1-0" {
-				t.Errorf("unexpected public leaderboard request: %s %s", r.Method, r.URL)
+		if r.URL.Path == "/coding-benchmark" {
+			if r.Method != "GET" || r.Header.Get("x-api-key") != "" || r.Header.Get("Authorization") != "" {
+				t.Errorf("unexpected public Requesty request: %s %s", r.Method, r.URL)
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
-			switch number(body, "page", 0) {
-			case 1:
-				writeJSON(w, 200, M{"pagination": M{"page": 1, "total_pages": 2}, "rows": []M{
-					taskRow("Shared Agent", "Verbose", "none", 990000),
-					taskRow("Other Agent", "Compact", "high", 330),
-				}})
-			case 2:
-				writeJSON(w, 200, M{"pagination": M{"page": 2, "total_pages": 2}, "rows": []M{
-					taskRow("Shared Agent", "Compact", "high", 330000),
-					taskRow("Shared Agent", "Compact", "low", 165000),
-					taskRow("Shared Agent", "Missing", "max", 330),
-				}})
-			default:
-				t.Errorf("unexpected leaderboard page: %v", body)
-				w.WriteHeader(http.StatusBadRequest)
-			}
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<script>"rows":[{"model":"verbose","tasks":129,"totalTokensM":3},{"model":"compact","tasks":129,"totalTokensM":1},{"model":"partial","tasks":12,"totalTokensM":0.2}]</script>`))
 			return
 		}
 		if r.Method != "GET" || r.Header.Get("x-api-key") != "benchmark-test-key" {
@@ -104,7 +88,7 @@ func TestModelEfficiencyUsesTaskTokensAndTraeRates(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	efficiency := state.Efficiency
-	if efficiency.Enabled != 3 || efficiency.Agent != "Shared Agent" || len(efficiency.Candidates) != 2 {
+	if efficiency.Enabled != 3 || efficiency.Agent != "Requesty Coding Agent" || len(efficiency.Candidates) != 2 {
 		t.Fatalf("unexpected benchmark coverage: %+v", efficiency)
 	}
 	winner, runnerUp := efficiency.Candidates[0], efficiency.Candidates[1]
@@ -112,16 +96,6 @@ func TestModelEfficiencyUsesTaskTokensAndTraeRates(t *testing.T) {
 		winner.Rate != 2 || winner.TokensPerTask != 1000 || winner.CostPerTask != 2000 ||
 		runnerUp.ID != "verbose" || runnerUp.CostPerTask != 3000 {
 		t.Fatalf("unexpected cost ordering: %+v", efficiency.Candidates)
-	}
-}
-
-func taskRow(agent, model, effort string, tokens int) M {
-	return M{
-		"status": "display",
-		"metadata": M{
-			"agent_display": M{"label": agent}, "model_display": M{"label": model}, "reasoning_effort": effort,
-		},
-		"metrics": M{"n_trials": 330, "total_tokens": tokens},
 	}
 }
 

@@ -174,8 +174,8 @@ const footer=el('p','评分来源 ','fine');
 footer.append(source);
 if(data?.version)footer.append(' · Intelligence Index v'+data.version);
 if(data?.updated_at)footer.append(' · 评分更新于 '+clock(data.updated_at));
-const taskSource=el('a','Terminal-Bench 4.1');
-taskSource.href='https://www.tbench.ai/?version=4.1';
+const taskSource=el('a','Requesty Coding Benchmark');
+taskSource.href='https://www.requesty.ai/coding-benchmark';
 taskSource.target='_blank';
 taskSource.rel='noopener noreferrer';
 footer.append(' · Token 来源 ',taskSource);
@@ -227,7 +227,7 @@ const identity=el('div');
 identity.append(el('h3',winner.name),el('code',winner.id));
 const cost=el('div',undefined,'efficiencyRate');
 cost.append(el('span','每任务预估消耗'),el('strong',usage.format(winner.cost_per_task)));
-const details=[winner.max?'Max':'标准',winner.effort&&'思考 '+winner.effort,'Intelligence '+fmt(winner.intelligence),usage.format(winner.tokens_per_task)+' Token/任务 × '+rateText(winner.rate)+(winner.off_peak?' 闲时':' 常规'),'Terminal-Bench · '+winner.task_agent];
+const details=[winner.max?'Max':'标准',winner.effort&&'思考 '+winner.effort,'Intelligence '+fmt(winner.intelligence),usage.format(winner.tokens_per_task)+' Token/任务 × '+rateText(winner.rate)+(winner.off_peak?' 闲时':' 常规'),'榜单默认配置 · '+winner.task_agent];
 result.replaceChildren(identity,cost,el('p',details.filter(Boolean).join(' · '),'fine'));
 }
 slider.oninput=recommend;
@@ -299,10 +299,10 @@ if(st.benchmark_id&&!Array.from(benchmark.options).some(option=>option.value===s
 benchmark.value=st.benchmark_id;benchmarkField.append(el('span','Intelligence 评分型号'),benchmark);
 const taskField=el('label'),taskModel=el('select');taskModel.setAttribute('aria-label',m.display_name+' 任务 Token 映射');
 const autoTask=el('option','自动匹配');autoTask.value='';taskModel.append(autoTask);
-for(const option of s.efficiency?.task_model_options||[]){const efforts=(option.efforts||[]).join('/');const label=option.agent+' · '+option.label+(efforts?' · '+efforts:'');const item=el('option',label);item.value=JSON.stringify([option.agent_id,option.name]);taskModel.append(item);}
+for(const option of s.efficiency?.task_model_options||[]){const efforts=(option.efforts||[]).map(effort=>effort==='default'?'榜单默认配置':effort).join('/');const label=option.agent+' · '+option.label+(efforts?' · '+efforts:'');const item=el('option',label);item.value=JSON.stringify([option.agent_id,option.name]);taskModel.append(item);}
 const savedTaskMapping=st.task_agent_name&&st.task_model_name?JSON.stringify([st.task_agent_name,st.task_model_name]):'';
 if(savedTaskMapping&&!Array.from(taskModel.options).some(option=>option.value===savedTaskMapping)){const item=el('option','已保存映射 · '+st.task_agent_name+' / '+st.task_model_name);item.value=savedTaskMapping;taskModel.append(item);}
-taskModel.value=savedTaskMapping;taskField.append(el('span','Terminal-Bench Agent / Token 型号'),taskModel);
+taskModel.value=savedTaskMapping;taskField.append(el('span','任务榜单 Agent / Token 型号'),taskModel);
 const selectedTaskMapping=()=>{try{return taskModel.value?JSON.parse(taskModel.value):['',''];}catch{return['',''];}};
 fields.append(mappingTitle,benchmarkField,taskField);
 

@@ -50,17 +50,25 @@ type benchmarkSnapshot struct {
 }
 
 func (a *App) benchmarkJSON(req *http.Request, target any) error {
+	body, err := a.benchmarkBody(req)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(body, target)
+}
+
+func (a *App) benchmarkBody(req *http.Request) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(req.Context(), 12*time.Second)
 	defer cancel()
 	res, err := a.client.Do(req.WithContext(ctx))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", res.StatusCode)
+		return nil, fmt.Errorf("HTTP %d", res.StatusCode)
 	}
-	return json.NewDecoder(io.LimitReader(res.Body, 4<<20)).Decode(target)
+	return io.ReadAll(io.LimitReader(res.Body, 4<<20))
 }
 
 func (a *App) fetchBenchmarks(ctx context.Context) (benchmarkScores, error) {
@@ -190,7 +198,7 @@ func (a *App) benchmarkWorker(ctx context.Context) {
 				snapshot.usage = next
 				nextUsage = time.Now().Add(benchmarkTTL)
 			} else {
-				log.Printf("Terminal-Bench task tokens: %v", err)
+				log.Printf("Requesty coding task tokens: %v", err)
 				nextUsage = time.Now().Add(time.Hour)
 			}
 		}

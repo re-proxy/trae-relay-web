@@ -2,15 +2,22 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"fmt"
+	"html"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 )
 
-const terminalBenchURL = "https://api.harborframework.com/functions/v1/leaderboard-read"
+const requestyBenchmarkURL = "https://www.requesty.ai/coding-benchmark"
+
+var (
+	requestyEscapedRows = regexp.MustCompile(`\\"rows\\":(\[.*?\])`)
+	requestyPlainRows   = regexp.MustCompile(`"rows":(\[.*?\])`)
+)
 
 type taskLeaderboard map[string]taskAgent
 
@@ -41,82 +48,64 @@ type taskModelOption struct {
 func (a *App) fetchTaskLeaderboard(ctx context.Context) (taskLeaderboard, error) {
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	agents := taskLeaderboard{}
-	total := 0
-	for page := 1; page <= 50; page++ {
-		body := fmt.Sprintf(`{"package":"terminal-bench/terminal-bench","name":"4-1-0","page":%d,"page_size":100}`, page)
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, terminalBenchURL, strings.NewReader(body))
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		var result struct {
-			Pagination struct {
-				Page  int `json:"page"`
-				Total int `json:"total_pages"`
-			} `json:"pagination"`
-			Rows []taskLeaderboardRow `json:"rows"`
-		}
-		if err := a.benchmarkJSON(req, &result); err != nil {
-			return nil, err
-		}
-		if page == 1 {
-			total = result.Pagination.Total
-		}
-		if len(result.Rows) == 0 || result.Pagination.Page != page || result.Pagination.Total != total || total < page {
-			return nil, fmt.Errorf("incomplete Terminal-Bench leaderboard at page %d", page)
-		}
-		for _, row := range result.Rows {
-			agents.add(row)
-		}
-		if page == total {
-			if len(agents) == 0 {
-				return nil, errors.New("no Terminal-Bench task token totals")
-			}
-			return agents, nil
-		}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestyBenchmarkURL, nil)
+	if err != nil {
+		return nil, err
 	}
-	return nil, errors.New("too many Terminal-Bench leaderboard pages")
+	var page struct {
+		Rows []struct {
+			Model        string  `json:"model"`
+			Tasks        int     `json:"tasks"`
+			TotalTokensM float64 `json:"totalTokensM"`
+		} `json:"rows"`
+	}
+	body, err := a.benchmarkBody(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := decodeRequestyRows(body, &page); err != nil {
+		return nil, err
+	}
+	if len(page.Rows) == 0 {
+		return nil, errors.New("no Requesty coding benchmark token rows")
+	}
+	const agentName = "Requesty Coding Agent"
+	const agentKey = "requesty-coding-agent"
+	agent := taskAgent{name: agentName, usage: map[taskModel]taskMeasurement{}}
+	for _, row := range page.Rows {
+		if row.Model == "" || row.Tasks < 129 || row.TotalTokensM <= 0 {
+			continue
+		}
+		modelKey := taskModel{taskModelName(row.Model), "default"}
+		if modelKey.name == "" {
+			continue
+		}
+		agent.usage[modelKey] = taskMeasurement{average: row.TotalTokensM * 1_000_000, label: row.Model}
+	}
+	if len(agent.usage) == 0 {
+		return nil, errors.New("no complete Requesty coding benchmark token rows")
+	}
+	return taskLeaderboard{agentKey: agent}, nil
 }
 
-type taskLeaderboardRow struct {
-	Status    string    `json:"status"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Metadata  struct {
-		Agent struct {
-			Label string `json:"label"`
-		} `json:"agent_display"`
-		Model struct {
-			Label string `json:"label"`
-		} `json:"model_display"`
-		Effort string `json:"reasoning_effort"`
-	} `json:"metadata"`
-	Metrics struct {
-		Trials int   `json:"n_trials"`
-		Tokens int64 `json:"total_tokens"`
-	} `json:"metrics"`
-}
-
-func (agents taskLeaderboard) add(row taskLeaderboardRow) {
-	label := strings.TrimSpace(row.Metadata.Agent.Label)
-	agentKey := benchmarkName(label)
-	key := taskModel{taskModelName(row.Metadata.Model.Label), benchmarkName(row.Metadata.Effort)}
-	if row.Status != "display" || agentKey == "" || key.name == "" || key.effort == "" || row.Metrics.Trials <= 0 || row.Metrics.Tokens <= 0 {
-		return
+func decodeRequestyRows(body []byte, target any) error {
+	page := html.UnescapeString(string(body))
+	matches := requestyEscapedRows.FindSubmatch([]byte(page))
+	if len(matches) == 0 {
+		matches = requestyPlainRows.FindSubmatch([]byte(page))
+		if len(matches) == 0 {
+			return errors.New("Requesty coding benchmark rows not found")
+		}
+		return json.Unmarshal(matches[1], target)
 	}
-	agent, found := agents[agentKey]
-	if !found {
-		agent = taskAgent{name: label, usage: map[taskModel]taskMeasurement{}}
-		agents[agentKey] = agent
+	decoded := string(matches[1])
+	for attempts := 0; attempts < 3 && !json.Valid([]byte(decoded)); attempts++ {
+		decoded = strings.ReplaceAll(decoded, `\"`, `"`)
 	}
-	if existing, found := agent.usage[key]; found && !row.UpdatedAt.After(existing.updatedAt) {
-		return
+	if !json.Valid([]byte(decoded)) {
+		return errors.New("invalid escaped Requesty coding benchmark rows")
 	}
-	agent.usage[key] = taskMeasurement{
-		average:   float64(row.Metrics.Tokens) / float64(row.Metrics.Trials),
-		updatedAt: row.UpdatedAt,
-		label:     strings.TrimSpace(row.Metadata.Model.Label),
-	}
+	return json.Unmarshal([]byte(decoded), target)
 }
 
 func (data taskLeaderboard) modelOptions() []taskModelOption {
@@ -185,6 +174,9 @@ func (agent taskAgent) tokensForMapped(model *benchmarkModel, mappedName, effort
 		if measurement, ok := agent.usage[taskModel{taskModelName(mappedName), effort}]; ok {
 			return measurement.average
 		}
+		if measurement, ok := agent.usage[taskModel{taskModelName(mappedName), "default"}]; ok {
+			return measurement.average
+		}
 		return 0
 	}
 	name := strings.TrimSpace(model.Name)
@@ -196,6 +188,9 @@ func (agent taskAgent) tokensForMapped(model *benchmarkModel, mappedName, effort
 	}
 	for _, value := range []string{name, model.Slug} {
 		if measurement, ok := agent.usage[taskModel{taskModelName(value), effort}]; ok {
+			return measurement.average
+		}
+		if measurement, ok := agent.usage[taskModel{taskModelName(value), "default"}]; ok {
 			return measurement.average
 		}
 	}
