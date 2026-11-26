@@ -9,7 +9,7 @@ const PAGES=[
 ];
 const PAGE_ALIAS={'/accounts':'/','/access':'/keys'};
 let S=null,attempt='',authorization=null,pinnedKey='';
-let sessionVersion=0,interactionDepth=0,uiRevision=0,lastStateUpdate=0,lastBalanceAttempt=0,statePollError='',balancePollError='';
+let sessionVersion=0,interactionDepth=0,uiRevision=0,lastStateUpdate=0,lastBalanceAttempt=0,statePollError='',balancePollError='',renderedPageData='';
 
 function currentPage(){const p=PAGE_ALIAS[location.pathname]||location.pathname;return PAGES.find(x=>x.path===p)||PAGES[0];}
 function endpoint(){return location.origin+'/v1';}
@@ -27,7 +27,7 @@ function link(text,path){const a=el('a',text);a.href=path;a.onclick=go;return a;
 
 function go(event){const a=event.currentTarget;if(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();if(a.pathname===location.pathname){render();return;}history.pushState({},'',a.pathname);render();}
 
-function showLogin(){sessionVersion++;poller.stop();lastBalanceAttempt=0;statePollError='';balancePollError='';modelDrafts.clear();modelExpanded.clear();S=null;attempt='';authorization=null;pinnedKey='';const p=$('password'),c=$('callback');if(p)p.value='';if(c)c.value='';render();}
+function showLogin(){sessionVersion++;poller.stop();lastBalanceAttempt=0;statePollError='';balancePollError='';modelDrafts.clear();modelExpanded.clear();modelView.intelligence=null;S=null;attempt='';authorization=null;pinnedKey='';const p=$('password'),c=$('callback');if(p)p.value='';if(c)c.value='';render();}
 async function refresh(){const version=sessionVersion;const next=await api('state');if(version!==sessionVersion)return;S=next;lastStateUpdate=Date.now();statePollError='';render();if(!document.hidden)poller.start();}
 
 /* ---------- automatic refresh ---------- */
@@ -37,7 +37,7 @@ const page=currentPage().id;
 if((page==='accounts'&&authorization)||(page==='keys'&&pinnedKey)||(page==='models'&&modelDrafts.size)||interactionDepth||content.contains(document.activeElement))return false;
 return !Array.from(content.querySelectorAll('.keyForm input')).some(input=>input.value.trim());
 }
-function pageData(state,page){if(page==='accounts')return [state.accounts,state.checkin_enabled,state.checkin_at];if(page==='models')return [state.models,state.settings];if(page==='keys')return state.keys;return state.usage;}
+function pageData(state,page){if(page==='accounts')return [state.accounts,state.checkin_enabled,state.checkin_at];if(page==='models')return [state.models,state.settings,state.efficiency];if(page==='keys')return state.keys;return state.usage;}
 async function autoRefresh(signal){
 const version=sessionVersion,revision=uiRevision;
 if(S.accounts.some(account=>account.enabled)&&Date.now()-lastBalanceAttempt>=60000){
@@ -47,9 +47,22 @@ catch(error){if(signal.aborted)throw error;balancePollError='余额更新失败�
 }
 const next=await api('state',undefined,signal);
 if(signal.aborted||version!==sessionVersion||revision!==uiRevision||!S)return;
-const page=currentPage().id,changed=JSON.stringify(pageData(S,page))!==JSON.stringify(pageData(next,page));
+const page=currentPage().id;
+const changed=renderedPageData!==JSON.stringify(pageData(next,page));
+const efficiencyChanged=page==='models'&&JSON.stringify(S.efficiency)!==JSON.stringify(next.efficiency);
 S=next;lastStateUpdate=Date.now();statePollError='';
-if(changed&&canAutoRender())render();else renderService();
+if(changed&&canAutoRender())render();
+else{
+if(efficiencyChanged){
+const previous=$('content').querySelector('.efficiencyPanel');
+if(previous){
+const sliderFocused=document.activeElement===$('minimum-intelligence');
+previous.replaceWith(efficiencyPanel(next.efficiency));
+if(sliderFocused)$('minimum-intelligence')?.focus({preventScroll:true});
+}
+}
+renderService();
+}
 }
 const poller=new ConsolePoller({enabled:()=>!!S&&!document.hidden&&!interactionDepth,run:autoRefresh,onError:error=>{if(S){statePollError='信息更新失败：'+error.message;renderService();}}});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)poller.stop();else if(S)poller.wake();});
@@ -109,35 +122,111 @@ box.append(form);return box;
 
 /* ---------- models ---------- */
 const modelDrafts=new Map();
-const modelView={q:'',filter:'all'};
+const modelView={q:'',filter:'all',intelligence:null,indexVersion:null};
 const modelExpanded=new Set();
 function rateText(v){return typeof v==='number'&&Number.isFinite(v)&&v>=0?v.toLocaleString(undefined,{maximumFractionDigits:6})+'×':null;}
 function rateWindow(w){
 if(!w)return '';
 const days=['一','二','三','四','五','六','日'],names=Array.isArray(w.weekdays)?w.weekdays.map(d=>days[d-1]).filter(Boolean):[];
-const span=Number.isFinite(w.start_minute)&&Number.isFinite(w.end_minute)?String(Math.floor(w.start_minute/60)).padStart(2,'0')+':'+String(w.start_minute%60).padStart(2,'0')+'–'+String(Math.floor(w.end_minute/60)).padStart(2,'0')+':'+String(w.end_minute%60).padStart(2,'0'):'';
+const timeLabel=n=>String(Math.floor(n/60)).padStart(2,'0')+':'+String(n%60).padStart(2,'0');
+const span=Number.isFinite(w.start_minute)&&Number.isFinite(w.end_minute)?timeLabel(w.start_minute)+'–'+(w.end_minute<w.start_minute?'次日':'')+timeLabel(w.end_minute):'';
 return [names.length?'周'+names.join('、'):'',span].filter(Boolean).join(' ');
 }
 function pricingPanel(m,max){
 const box=el('div',undefined,'rates'),p=max?m.max_pricing:m.pricing;
-const main=el('div',undefined,'main'),base=rateText(p&&p.catalog_rate);
-main.append(el('span',max?'MAX 基础倍率':'基础倍率'),el('strong',base||'—'));
+const offPeak=p?.activity_type==='off_peak';
+const main=el('div',undefined,'main'),base=rateText(offPeak?p.standard_rate:p?.catalog_rate);
+main.append(el('span',(max?'MAX ':'')+(offPeak?'忙时倍率':'基础倍率')),el('strong',base||'—'));
 if(!base)main.append(el('small','上游未提供'));
 box.append(main);
 if(p){
 const detail=el('div',undefined,'detail');
 const add=(label,value)=>{if(!value)return;const d=el('div');d.append(el('span',label),el('strong',value));detail.append(d);};
+if(!offPeak&&p.standard_rate!==p.catalog_rate)add('常规',rateText(p.standard_rate));
 add('会员',rateText(p.member_rate));
-add('活动',rateText(p.activity_rate));
+add(offPeak?'闲时':'活动',rateText(p.activity_rate));
 add('活动会员',rateText(p.activity_member_rate));
 if(detail.children.length)box.append(detail);
 const notes=[];
-const offPeak=(p.off_peak_windows||[]).map(rateWindow).filter(Boolean).join(' / ');
-if(p.activity_type==='off_peak'&&offPeak)notes.push('闲时活动（北京时间）：'+offPeak);
+const windows=(p.off_peak_windows||[]).map(rateWindow).filter(Boolean).join(' / ');
+if(offPeak&&windows)notes.push('北京时间闲时 '+windows);
 if(p.member_rate!==undefined||p.activity_rate!==undefined)notes.push('会员与活动价需满足上游条件，本页不推算实际扣费。');
 if(notes.length)box.append(el('p',notes.join(' '),'cond'));
 }
 if(!p)box.append(el('p','该档位未返回倍率，不会按 0 或另一档位价格处理。','cond'));
+return box;
+}
+function efficiencyPanel(data){
+const box=el('section',undefined,'efficiencyPanel'),title=el('h2','最低每任务预估消耗');
+title.id='efficiency-title';
+box.setAttribute('aria-labelledby',title.id);
+box.append(title);
+const messages={
+unconfigured:'配置具备 Pro 数据权限的 ARTIFICIAL_ANALYSIS_API_KEY 后即可比较。',
+loading:'正在同步 Intelligence 评分和任务 Token 用量…',
+plan_required:'当前 Artificial Analysis API Key 缺少 Pro 数据权限。',
+unavailable:'评测数据暂时无法读取，服务端会自动重试。'
+};
+const source=el('a','Artificial Analysis');
+source.href='https://artificialanalysis.ai/';
+source.target='_blank';
+source.rel='noopener noreferrer';
+const footer=el('p','评分来源 ','fine');
+footer.append(source);
+if(data?.version)footer.append(' · Intelligence Index v'+data.version);
+if(data?.updated_at)footer.append(' · 评分更新于 '+clock(data.updated_at));
+if(messages[data?.status||'unconfigured']){
+box.append(el('p',messages[data?.status||'unconfigured'],'fine'),footer);
+return box;
+}
+const {candidates,enabled,version,status,pending,usage_failed:usageFailed}=data;
+if(status==='stale')box.append(el('p','评测数据同步遇到问题，正在使用上次成功的数据。','fine'));
+if(usageFailed)box.append(el('p','部分任务用量暂时无法更新，服务端会自动重试。','fine'));
+if(!candidates.length){
+const message=pending?'已匹配模型的任务 Token 用量待同步。':enabled?'暂无同时具备匹配评分、任务 Token 用量和当前时段倍率的已启用模型。':'暂无启用的模型。';
+box.append(el('p',message,'fine'),footer);
+return box;
+}
+const scores=candidates.map(model=>model.intelligence);
+const min=Math.min(0,Math.floor(Math.min(...scores))),max=Math.max(min+1,Math.ceil(Math.max(...scores)));
+if(modelView.indexVersion!==version){modelView.indexVersion=version;modelView.intelligence=null;}
+const result=el('div',undefined,'efficiencyResult');
+result.setAttribute('role','status');
+const slider=el('input');
+slider.id='minimum-intelligence';
+slider.type='range';
+slider.min=min;
+slider.max=max;
+slider.step='0.1';
+slider.value=Math.min(max,Math.max(min,modelView.intelligence??min));
+const label=el('label','最低 Intelligence');
+label.htmlFor=slider.id;
+const value=el('output');
+value.setAttribute('for',slider.id);
+value.setAttribute('aria-hidden','true');
+const heading=el('div',undefined,'efficiencyControlHead');
+heading.append(label,value);
+const control=el('div',undefined,'efficiencyControl');
+control.append(heading,slider);
+const usage=new Intl.NumberFormat('zh-CN',{notation:'compact',maximumFractionDigits:2});
+function recommend(){
+const threshold=Number(slider.value);
+modelView.intelligence=threshold;
+value.value=fmt(threshold);
+slider.setAttribute('aria-valuetext',fmt(threshold)+' 分');
+const winner=candidates.find(model=>model.intelligence>=threshold);
+if(!winner){result.replaceChildren(el('p','没有达到该 Intelligence 门槛的可比较模型。','fine'));return;}
+const identity=el('div');
+identity.append(el('h3',winner.name),el('code',winner.id));
+const cost=el('div',undefined,'efficiencyRate');
+cost.append(el('span','每任务预估消耗'),el('strong',usage.format(winner.cost_per_task)));
+const details=[winner.max?'Max':'标准',winner.effort&&'思考 '+winner.effort,'Intelligence '+fmt(winner.intelligence),usage.format(winner.tokens_per_task)+' Token/任务 × '+rateText(winner.rate)+(winner.off_peak?' 闲时':' 常规')];
+result.replaceChildren(identity,cost,el('p',details.filter(Boolean).join(' · '),'fine'));
+}
+slider.oninput=recommend;
+recommend();
+const coverage=`可比较 ${candidates.length} / ${enabled} 个已启用模型。`+(pending?'部分模型的任务 Token 用量待同步。':'');
+box.append(result,control,el('p',coverage+' 预估值为 Terminal-Bench 4.1 平均输入及输出 Token × Trae 当期倍率。峰谷时段按北京时间，闲时价按非会员口径。','fine'),footer);
 return box;
 }
 function modelsPage(page){
@@ -145,6 +234,7 @@ const root=el('div',undefined,'page'),s=S;
 const refreshCatalog=async()=>{notice('正在请求上游模型目录…');await api('models/refresh',{});notice('模型目录已更新');await refresh();};
 root.append(pageHead(page,s.models.length?s.models.length+' 个可选':'',[button('刷新',refresh),button('刷新模型目录',refreshCatalog,'primary')]));
 if(!s.models.length){root.append(emptyBox('模型目录还没有加载','模型清单来自启用账号的实时上游目录，未加载前不会提供虚构模型。',['确认至少一个账号已启用','点击「刷新模型目录」向上游读取','读取失败会保留上次成功的目录']));return root;}
+root.append(efficiencyPanel(s.efficiency));
 
 const view=modelView;
 const bar=el('div',undefined,'toolbar');
@@ -202,6 +292,7 @@ s.settings={...s.settings,[m.id]:saved};if(S&&S!==s)S.settings={...S.settings,[m
 const edited={disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:maxBox.checked};
 if(Object.keys(saved).some(key=>saved[key]!==edited[key]))modelDrafts.set(m.id,edited);else modelDrafts.delete(m.id);
 notice('已保存 '+m.display_name+' 的偏好');paint();
+await refresh();
 });
 save.disabled=!initialDirty;
 const editor=el('div',undefined,'mEditor');editor.id='model-editor-'+encodeURIComponent(m.id);editor.hidden=!modelExpanded.has(m.id);editor.append(fields,maxLabel);
@@ -296,6 +387,7 @@ $('logout').hidden=!S;$('login').hidden=!!S;
 const content=$('content');
 if(!S){content.hidden=true;content.replaceChildren();renderService();return;}
 content.hidden=false;
+renderedPageData=JSON.stringify(pageData(S,page.id));
 content.replaceChildren(({accounts:accountsPage,models:modelsPage,keys:keysPage,usage:usagePage})[page.id](page));
 content.classList.remove('swap');void content.offsetWidth;content.classList.add('swap');
 renderService();

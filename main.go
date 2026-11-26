@@ -47,6 +47,8 @@ type Config struct {
 	CheckinHour                                                   int
 	CheckinMinute                                                 int
 	SecureCookie                                                  bool
+	ArtificialAnalysisKey                                         string
+	ArtificialAnalysisAliases                                     map[string]string
 }
 type cachedModels struct {
 	Models []Model
@@ -66,6 +68,7 @@ type App struct {
 	lastUsed      map[string]time.Time
 	cursor        int
 	models        map[string]cachedModels
+	benchmarks    benchmarkSnapshot
 	sessions      map[string]Session
 	logins        map[string]*LoginAttempt
 	adminSessions map[string]time.Time
@@ -304,6 +307,13 @@ func main() {
 	}
 	cfg := Config{Addr: env("RELAY_LISTEN", "0.0.0.0:"+env("PORT", "8317")), DataDir: env("RELAY_DATA_DIR", "data"), AdminPassword: os.Getenv("RELAY_ADMIN_PASSWORD"), MasterKey: os.Getenv("RELAY_MASTER_KEY"), Version: env("TRAE_IDE_VERSION", "3.4.0"), VersionCode: env("TRAE_IDE_VERSION_CODE", "20260919"), Concurrency: n, Timeout: 180 * time.Second, FirstEvent: time.Duration(first) * time.Second, QueueTimeout: time.Duration(queue) * time.Millisecond, MinInterval: time.Duration(gap) * time.Millisecond, SelectByCredits: credits == "credits", CheckinEnabled: checkin, CheckinHour: hour, CheckinMinute: minute}
 	cfg.SecureCookie = env("RELAY_SECURE_COOKIE", "false") == "true"
+	cfg.ArtificialAnalysisKey = strings.TrimSpace(os.Getenv("ARTIFICIAL_ANALYSIS_API_KEY"))
+	if raw := os.Getenv("ARTIFICIAL_ANALYSIS_MODEL_MAP"); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &cfg.ArtificialAnalysisAliases); err != nil {
+			log.Print("ARTIFICIAL_ANALYSIS_MODEL_MAP must be a JSON object mapping upstream model names to benchmark IDs or slugs")
+			cfg.ArtificialAnalysisAliases = nil
+		}
+	}
 	a, e := newApp(cfg)
 	if e != nil {
 		log.Fatal(e)
@@ -320,6 +330,7 @@ func main() {
 	}()
 	go a.catalogWorker(ctx)
 	go a.checkinWorker(ctx)
+	go a.benchmarkWorker(ctx)
 	log.Printf("Trae Relay Web listening on %s", cfg.Addr)
 	if e = srv.ListenAndServe(); e != nil && !errors.Is(e, http.ErrServerClosed) {
 		log.Fatal(e)

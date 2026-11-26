@@ -85,7 +85,7 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 		for _, acc := range a.store.state.Accounts {
 			accounts = append(accounts, M{"id": acc.ID, "name": acc.Name, "enabled": acc.Enabled, "scope": acc.Scope, "tenant_name": acc.TenantName, "expiry": acc.Expiry, "check": acc.Check, "balance": acc.Balance, "checkin_day": acc.CheckinDay, "checkin_result": acc.CheckinResult, "checkin_off": acc.CheckinOff})
 		}
-		settings := M{}
+		settings := map[string]ModelSetting{}
 		for k, v := range a.store.state.Models {
 			settings[k] = v
 		}
@@ -104,8 +104,9 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 		if acc, ok := a.store.active(); ok {
 			models = append(models, a.models[acc.ID].Models...)
 		}
+		benchmarks := a.benchmarks
 		a.mu.Unlock()
-		writeJSON(w, 200, M{"accounts": accounts, "models": models, "settings": settings, "usage": usage, "keys": keys, "in_flight": inflight, "api_key_suffix": suffix(a.store.apiKey()), "version": "0.1.0", "checkin_enabled": a.cfg.CheckinEnabled, "checkin_at": fmt.Sprintf("%02d:%02d", a.cfg.CheckinHour, a.cfg.CheckinMinute)})
+		writeJSON(w, 200, M{"accounts": accounts, "models": models, "settings": settings, "efficiency": a.efficiency(models, settings, benchmarks, time.Now()), "usage": usage, "keys": keys, "in_flight": inflight, "api_key_suffix": suffix(a.store.apiKey()), "version": "0.1.0", "checkin_enabled": a.cfg.CheckinEnabled, "checkin_at": fmt.Sprintf("%02d:%02d", a.cfg.CheckinHour, a.cfg.CheckinMinute)})
 	case r.URL.Path == "/admin/account/check" && r.Method == "POST":
 		a.accountInspect(w, r, false)
 	case r.URL.Path == "/admin/account/balance" && r.Method == "POST":

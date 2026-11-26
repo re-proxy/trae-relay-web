@@ -100,6 +100,20 @@ code{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;fo
 .list{border-top:1px solid var(--line-soft)}
 
 /* model library */
+.efficiencyPanel{display:grid;gap:10px;margin-bottom:18px;padding:15px 16px;border:1px solid #31432a;border-radius:10px;background:linear-gradient(130deg,#17251b,#101922 72%)}
+.efficiencyPanel h2{margin:0;font-size:15px;font-weight:600}
+.efficiencyPanel .fine{margin:0}
+.efficiencyResult{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:4px 12px}
+.efficiencyResult h3{margin:0;font-size:17px;font-weight:600;overflow-wrap:anywhere}
+.efficiencyResult code{font-size:11px}
+.efficiencyResult .fine{grid-column:1/-1}
+.efficiencyRate{display:grid;justify-items:end;gap:2px}
+.efficiencyRate span{font-size:11px;color:var(--dim)}
+.efficiencyRate strong{font-size:22px;line-height:1.15;font-weight:600;color:var(--lime);font-variant-numeric:tabular-nums}
+.efficiencyControl{padding-top:9px;border-top:1px solid #324131}
+.efficiencyControlHead{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.efficiencyControl output{color:var(--lime);font-size:13px;font-variant-numeric:tabular-nums}
+.efficiencyControl input{display:block;min-height:24px;margin:3px 0 0;padding:0;accent-color:var(--lime);background:transparent;cursor:pointer}
 .toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:10px}
 .toolbar input[type=search]{flex:1;min-width:200px}
 .toolbar select{width:auto;min-width:118px}

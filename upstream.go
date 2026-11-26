@@ -149,6 +149,21 @@ func soloMessages(messages []M) ([]M, error) {
 	}
 	return append(out, pending...), nil
 }
+func selectedReasoningEffort(model Model, setting ModelSetting, effort string) (string, bool) {
+	if effort == "" {
+		effort = setting.Effort
+	}
+	if effort == "" {
+		effort = model.DefaultEffort
+	}
+	for _, v := range model.Efforts {
+		if v == effort {
+			return effort, true
+		}
+	}
+	return "", false
+}
+
 func upstreamBody(messages []M, tools []M, model Model, setting ModelSetting, effort string) (M, error) {
 	msgs, e := soloMessages(messages)
 	if e != nil {
@@ -169,17 +184,8 @@ func upstreamBody(messages []M, tools []M, model Model, setting ModelSetting, ef
 		body["mode_type"] = 1
 		body["context_window_size"] = cw
 	}
-	if effort == "" {
-		effort = setting.Effort
-	}
-	if effort == "" {
-		effort = model.DefaultEffort
-	}
-	for _, v := range model.Efforts {
-		if v == effort {
-			body["reasoning_effort"] = effort
-			break
-		}
+	if effort, ok := selectedReasoningEffort(model, setting, effort); ok {
+		body["reasoning_effort"] = effort
 	}
 	if len(tools) > 0 {
 		arr := []M{}

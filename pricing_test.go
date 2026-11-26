@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestPricingProfilesAndDiscounts(t *testing.T) {
@@ -22,6 +23,10 @@ func TestPricingProfilesAndDiscounts(t *testing.T) {
 	}
 	if m.MaxPricing == nil || *m.MaxPricing.Catalog != 2 || *m.MaxPricing.Standard != 4 {
 		t.Fatalf("bad Max pricing: %+v", m.MaxPricing)
+	}
+	thursdayOffPeak := time.Date(2026, 11, 26, 4, 0, 0, 0, pricingTimezone)
+	if rate, offPeak := m.MaxPricing.rateAt(thursdayOffPeak); rate == nil || *rate != 4 || offPeak {
+		t.Fatal("standard profile's off-peak rate leaked to Max")
 	}
 	b, _ := json.Marshal(m)
 	var out M
@@ -56,5 +61,59 @@ func TestPricingDetailOverrideAndMerge(t *testing.T) {
 	models = parseCatalog(root, "chat_v3")
 	if len(models) != 1 || models[0].Pricing != nil || models[0].MaxPricing == nil {
 		t.Fatal("Max rate leaked to standard profile")
+	}
+}
+
+func TestOffPeakPricingUsesBeijingWindows(t *testing.T) {
+	var config M
+	if err := json.Unmarshal([]byte(`{
+		"consumption_rate":{"data":{"rate":0.06}},
+		"activity_discount":{"data":{
+			"current":{"consumption_rate":0.06,"before_consumption_rate":0.12,"discount_type":"off_peak"},
+			"member":{"after_consumption_rate":0.03},
+			"off_peak":{"time_windows":[
+				{"weekdays":[1,2,3,4,5],"start_minute":0,"end_minute":540},
+				{"weekdays":[1,2,3,4,5],"start_minute":720,"end_minute":840},
+				{"weekdays":[1,2,3,4,5],"start_minute":1080,"end_minute":1440},
+				{"weekdays":[6,7],"start_minute":0,"end_minute":1440},
+				{"weekdays":"invalid","start_minute":0,"end_minute":1440}
+			]}
+		}}
+	}`), &config); err != nil {
+		t.Fatal(err)
+	}
+	price := parseModelPricing(M{"display_contact_config": config})
+	for _, test := range []struct {
+		utc     string
+		offPeak bool
+	}{
+		{"2026-11-26T00:59:00Z", true},  // Thursday 08:59
+		{"2026-11-26T01:00:00Z", false}, // Thursday 09:00
+		{"2026-11-26T04:00:00Z", true},  // Thursday 12:00
+		{"2026-11-26T06:00:00Z", false}, // Thursday 14:00
+		{"2026-11-26T10:00:00Z", true},  // Thursday 18:00
+		{"2026-11-28T02:00:00Z", true},  // Saturday 10:00
+	} {
+		now, err := time.Parse(time.RFC3339, test.utc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := 0.12
+		if test.offPeak {
+			want = 0.06
+		}
+		if rate, offPeak := price.rateAt(now); rate == nil || *rate != want || offPeak != test.offPeak {
+			t.Errorf("at %s expected rate %v (off-peak %t), got %v (off-peak %t)", test.utc, want, test.offPeak, rate, offPeak)
+		}
+	}
+	w := RateWindow{Weekdays: []int{7}, Start: 1320, End: 480}
+	if !w.includes(7, 1320) || !w.includes(1, 479) || w.includes(1, 480) || w.includes(2, 479) {
+		t.Fatal("overnight window did not carry Sunday's eligibility into Monday morning")
+	}
+	delete(obj(obj(obj(config["activity_discount"])["data"])["current"]), "before_consumption_rate")
+	price = parseModelPricing(M{"display_contact_config": config})
+	noonPeak := time.Date(2026, 11, 26, 10, 0, 0, 0, pricingTimezone)
+	if rate, offPeak := price.rateAt(noonPeak); rate != nil || offPeak {
+		t.Fatal("discounted catalog rate was treated as a known busy rate")
 	}
 }
