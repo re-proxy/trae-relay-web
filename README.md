@@ -113,13 +113,13 @@ curl http://192.168.1.10:8317/v1/models \
 
 ### 最低每任务预估消耗
 
-在 [Artificial Analysis](https://artificialanalysis.ai/api-reference) 生成具备 Pro 数据权限的 API Key，填入服务端 `.env` 的 `ARTIFICIAL_ANALYSIS_API_KEY`，再执行 `docker compose up -d --build`。免费 API 提供 Intelligence Index，模型明细中的分评测 Token 用量需要 Pro 或 Commercial 权限。服务端每 6 小时刷新评分和已匹配模型的 Token 用量。同步失败时保留最近一次成功的数据。
+在 [Artificial Analysis](https://artificialanalysis.ai/api-reference) 生成免费 API Key，填入服务端 `.env` 的 `ARTIFICIAL_ANALYSIS_API_KEY`，再执行 `docker compose up -d --build`。评分来自免费 Intelligence Index API，Token 用量来自 [Terminal-Bench 4.1 公开榜单](https://www.tbench.ai/?version=4.1)。服务端每 6 小时刷新两项数据，同步失败时继续使用上次成功的数据。
 
-在「模型」页拖动「最低 Intelligence」滑块，即可找到达到门槛且每任务预估消耗最低的已启用模型。推荐使用已保存的 Max 与思考档位。按每个模型在 Terminal-Bench 4.1 的 66 道任务中平均用掉的输入和输出 Token（含思考），乘以该档位的 Trae 倍率。结果是同一评测上的相对消耗，实际扣费随任务、缓存和折扣变化。预估消耗相同时优先推荐 Intelligence 更高的模型。
+在「模型」页拖动「最低 Intelligence」滑块，即可找到达到门槛且每任务预估消耗最低的已启用模型。推荐使用已保存的 Max 与思考档位。平均 Token 用量取榜单总 Token 除以试验次数，再乘以该档位的 Trae 倍率。每次比较使用覆盖当前模型最多的同一 Agent 评测结果，页面会显示 Agent 名称与覆盖数。预估消耗相同时优先推荐 Intelligence 更高的模型。实际扣费随任务、缓存和折扣变化。
 
 Trae 目录提供闲时倍率和有效时间窗时，按北京时间判断是否使用非会员闲时价，其余时段采用目录常规倍率。缺少当前时段倍率的模型会跳过。模型列表显示目录中的忙时、闲时和会员倍率。
 
-参与比较的模型还需要匹配的评分和 Token 数据。自动匹配使用上游模型名、目录 ID 或显示名及思考档位。上游命名与评测版本不同时，可用 `ARTIFICIAL_ANALYSIS_MODEL_MAP` 指定匹配，例如 `'{"model__dev@high":"benchmark-id-or-slug"}'`。键使用上游请求的模型名和实际发送的思考档位（无思考档位时省略 `@...`），值优先使用评测 ID，也支持唯一的 slug。
+参与比较的模型还需要匹配的评分、模型版本和思考档位用量。自动匹配使用上游模型名、目录 ID 或显示名及思考档位。上游命名与 Artificial Analysis 不同时，可用 `ARTIFICIAL_ANALYSIS_MODEL_MAP` 指定匹配，例如 `'{"model__dev@high":"benchmark-id-or-slug"}'`。键使用上游请求的模型名和实际发送的思考档位（无思考档位时省略 `@...`），值优先使用评测 ID，也支持唯一的 slug。
 
 ## 给下游 router 查询余额
 

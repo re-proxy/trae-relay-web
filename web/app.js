@@ -162,9 +162,8 @@ title.id='efficiency-title';
 box.setAttribute('aria-labelledby',title.id);
 box.append(title);
 const messages={
-unconfigured:'配置具备 Pro 数据权限的 ARTIFICIAL_ANALYSIS_API_KEY 后即可比较。',
+unconfigured:'配置免费的 ARTIFICIAL_ANALYSIS_API_KEY 后即可比较。',
 loading:'正在同步 Intelligence 评分和任务 Token 用量…',
-plan_required:'当前 Artificial Analysis API Key 缺少 Pro 数据权限。',
 unavailable:'评测数据暂时无法读取，服务端会自动重试。'
 };
 const source=el('a','Artificial Analysis');
@@ -175,15 +174,20 @@ const footer=el('p','评分来源 ','fine');
 footer.append(source);
 if(data?.version)footer.append(' · Intelligence Index v'+data.version);
 if(data?.updated_at)footer.append(' · 评分更新于 '+clock(data.updated_at));
+const taskSource=el('a','Terminal-Bench 4.1');
+taskSource.href='https://www.tbench.ai/?version=4.1';
+taskSource.target='_blank';
+taskSource.rel='noopener noreferrer';
+footer.append(' · Token 来源 ',taskSource);
+if(data?.agent)footer.append(' · '+data.agent);
 if(messages[data?.status||'unconfigured']){
 box.append(el('p',messages[data?.status||'unconfigured'],'fine'),footer);
 return box;
 }
-const {candidates,enabled,version,status,pending,usage_failed:usageFailed}=data;
+const {candidates,enabled,version,status}=data;
 if(status==='stale')box.append(el('p','评测数据同步遇到问题，正在使用上次成功的数据。','fine'));
-if(usageFailed)box.append(el('p','部分任务用量暂时无法更新，服务端会自动重试。','fine'));
 if(!candidates.length){
-const message=pending?'已匹配模型的任务 Token 用量待同步。':enabled?'暂无同时具备匹配评分、任务 Token 用量和当前时段倍率的已启用模型。':'暂无启用的模型。';
+const message=enabled?'暂无同时具备匹配评分、公开任务用量和当前时段倍率的已启用模型。':'暂无启用的模型。';
 box.append(el('p',message,'fine'),footer);
 return box;
 }
@@ -225,8 +229,8 @@ result.replaceChildren(identity,cost,el('p',details.filter(Boolean).join(' · ')
 }
 slider.oninput=recommend;
 recommend();
-const coverage=`可比较 ${candidates.length} / ${enabled} 个已启用模型。`+(pending?'部分模型的任务 Token 用量待同步。':'');
-box.append(result,control,el('p',coverage+' 预估值为 Terminal-Bench 4.1 平均输入及输出 Token × Trae 当期倍率。峰谷时段按北京时间，闲时价按非会员口径。','fine'),footer);
+const coverage=`同一 Agent 下可比较 ${candidates.length} / ${enabled} 个已启用模型。`;
+box.append(result,control,el('p',coverage+' 预估值为平均 Token/任务 × Trae 当期倍率。峰谷时段按北京时间，闲时价按非会员口径。','fine'),footer);
 return box;
 }
 function modelsPage(page){

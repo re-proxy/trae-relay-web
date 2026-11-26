@@ -7,23 +7,17 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"maps"
 	"math"
 	"net/http"
-	"net/url"
 	"sort"
 	"strings"
 	"time"
 )
 
 const (
-	intelligenceURL = "https://artificialanalysis.ai/api/v2/language/models"
-	taskBenchmark   = "terminalbench_v4_1"
-	tasksPerRun     = 66 // Terminal-Bench 4.1, per the Artificial Analysis benchmarking methodology.
+	intelligenceURL = "https://artificialanalysis.ai/api/v2/language/models/free"
 	benchmarkTTL    = 6 * time.Hour
 )
-
-var errBenchmarkPlan = errors.New("Artificial Analysis requires Pro API access")
 
 type benchmarkModel struct {
 	ID          string `json:"id"`
@@ -34,50 +28,39 @@ type benchmarkModel struct {
 	} `json:"evaluations"`
 }
 
-type benchmarkSnapshot struct {
+type benchmarkScores struct {
 	version   float64
 	updatedAt time.Time
-	status    string
 	byID      map[string]*benchmarkModel
 	bySlug    map[string]*benchmarkModel
 	byName    map[string]*benchmarkModel
-	usage     map[string]taskUsage
 }
 
-type taskUsage struct {
-	average   float64
-	refreshAt time.Time
-	failed    bool
+type benchmarkSnapshot struct {
+	benchmarkScores
+	scoresFailed bool
+	usageFailed  bool
+	usage        taskLeaderboard
 }
 
-func (a *App) benchmarkJSON(ctx context.Context, endpoint string, target any) error {
-	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+func (a *App) benchmarkJSON(req *http.Request, target any) error {
+	ctx, cancel := context.WithTimeout(req.Context(), 12*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("x-api-key", a.cfg.ArtificialAnalysisKey)
-	res, err := a.client.Do(req)
+	res, err := a.client.Do(req.WithContext(ctx))
 	if err != nil {
 		return err
 	}
 	defer res.Body.Close()
-	switch res.StatusCode {
-	case http.StatusOK:
-		return json.NewDecoder(io.LimitReader(res.Body, 4<<20)).Decode(target)
-	case http.StatusForbidden:
-		return errBenchmarkPlan
-	default:
+	if res.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d", res.StatusCode)
 	}
+	return json.NewDecoder(io.LimitReader(res.Body, 4<<20)).Decode(target)
 }
 
-func (a *App) fetchBenchmarks(ctx context.Context) (benchmarkSnapshot, error) {
+func (a *App) fetchBenchmarks(ctx context.Context) (benchmarkScores, error) {
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	snapshot := benchmarkSnapshot{
-		status: "ready",
+	snapshot := benchmarkScores{
 		byID:   map[string]*benchmarkModel{},
 		bySlug: map[string]*benchmarkModel{},
 		byName: map[string]*benchmarkModel{},
@@ -93,18 +76,23 @@ func (a *App) fetchBenchmarks(ctx context.Context) (benchmarkSnapshot, error) {
 			} `json:"pagination"`
 			Data []benchmarkModel `json:"data"`
 		}
-		if err := a.benchmarkJSON(ctx, fmt.Sprintf("%s?page=%d", intelligenceURL, page), &result); err != nil {
-			return benchmarkSnapshot{}, err
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s?page=%d", intelligenceURL, page), nil)
+		if err != nil {
+			return benchmarkScores{}, err
+		}
+		req.Header.Set("x-api-key", a.cfg.ArtificialAnalysisKey)
+		if err := a.benchmarkJSON(req, &result); err != nil {
+			return benchmarkScores{}, err
 		}
 		if page == 1 {
 			snapshot.version = result.Version
 			total = result.Pagination.Total
 		}
 		if result.Version <= 0 || result.Version != snapshot.version {
-			return benchmarkSnapshot{}, errors.New("inconsistent Intelligence Index version")
+			return benchmarkScores{}, errors.New("inconsistent Intelligence Index version")
 		}
 		if result.Pagination.Page != page || result.Pagination.Total != total || total < page || result.Pagination.HasMore != (page < total) || len(result.Data) == 0 {
-			return benchmarkSnapshot{}, fmt.Errorf("incomplete model list at page %d", page)
+			return benchmarkScores{}, fmt.Errorf("incomplete model list at page %d", page)
 		}
 		for i := range result.Data {
 			row := &result.Data[i]
@@ -120,7 +108,7 @@ func (a *App) fetchBenchmarks(ctx context.Context) (benchmarkSnapshot, error) {
 			return snapshot, nil
 		}
 	}
-	return benchmarkSnapshot{}, errors.New("too many model pages")
+	return benchmarkScores{}, errors.New("too many model pages")
 }
 
 func indexBenchmark(index map[string]*benchmarkModel, key string, row *benchmarkModel) {
@@ -134,31 +122,6 @@ func indexBenchmark(index map[string]*benchmarkModel, key string, row *benchmark
 	index[key] = row
 }
 
-func (a *App) fetchTaskTokens(ctx context.Context, id string, version float64) (float64, error) {
-	var result struct {
-		Version float64 `json:"intelligence_index_version"`
-		Data    struct {
-			ID     string `json:"id"`
-			Counts map[string]struct {
-				Input  *float64 `json:"input_tokens"`
-				Output *float64 `json:"output_tokens"`
-			} `json:"evaluation_token_counts"`
-		} `json:"data"`
-	}
-	if err := a.benchmarkJSON(ctx, intelligenceURL+"/"+url.PathEscape(id), &result); err != nil {
-		return 0, err
-	}
-	if result.Data.ID != id || result.Version != version {
-		return 0, errors.New("benchmark detail does not match the model or Intelligence Index version")
-	}
-	counts := result.Data.Counts[taskBenchmark]
-	if counts.Input == nil || counts.Output == nil || *counts.Input < 0 || *counts.Output < 0 {
-		return 0, nil
-	}
-	// Output already includes reasoning tokens. The per-evaluation totals exclude repeats.
-	return *counts.Input/tasksPerRun + *counts.Output/tasksPerRun, nil
-}
-
 func (a *App) benchmarkWorker(ctx context.Context) {
 	if a.cfg.ArtificialAnalysisKey == "" {
 		return
@@ -166,8 +129,7 @@ func (a *App) benchmarkWorker(ctx context.Context) {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	var snapshot benchmarkSnapshot
-	var nextCatalog time.Time
-	usage := map[string]taskUsage{}
+	var nextScores, nextUsage time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -175,72 +137,39 @@ func (a *App) benchmarkWorker(ctx context.Context) {
 		case <-timer.C:
 		}
 		now := time.Now()
-		if !now.Before(nextCatalog) {
+		if !now.Before(nextScores) {
 			next, err := a.fetchBenchmarks(ctx)
-			switch {
-			case err == nil:
-				if snapshot.version != next.version {
-					clear(usage)
-				}
-				snapshot = next
-				nextCatalog = time.Now().Add(benchmarkTTL)
-			case errors.Is(err, errBenchmarkPlan):
-				snapshot.status = "plan_required"
-				nextCatalog = time.Now().Add(time.Hour)
-			default:
-				snapshot.status = "unavailable"
-				nextCatalog = time.Now().Add(time.Hour)
-				if ctx.Err() == nil {
-					log.Printf("Artificial Analysis model list: %v", err)
-				}
+			if ctx.Err() != nil {
+				return
+			}
+			snapshot.scoresFailed = err != nil
+			if err == nil {
+				snapshot.benchmarkScores = next
+				nextScores = time.Now().Add(benchmarkTTL)
+			} else {
+				log.Printf("Artificial Analysis model list: %v", err)
+				nextScores = time.Now().Add(time.Hour)
 			}
 		}
-		if snapshot.status == "ready" {
-			models, settings := a.benchmarkCatalog()
-			matches, _ := a.benchmarkMatches(models, settings, snapshot)
-			for _, match := range matches {
-				id := match.benchmark.ID
-				measurement := usage[id]
-				if time.Now().Before(measurement.refreshAt) {
-					continue
-				}
-				average, err := a.fetchTaskTokens(ctx, id, snapshot.version)
-				if ctx.Err() != nil {
-					return
-				}
-				if err != nil {
-					measurement.failed = true
-					measurement.refreshAt = time.Now().Add(time.Hour)
-					usage[id] = measurement
-					log.Printf("Artificial Analysis task tokens for %s: %v", id, err)
-					continue
-				}
-				usage[id] = taskUsage{average: average, refreshAt: time.Now().Add(benchmarkTTL)}
+		if !now.Before(nextUsage) {
+			next, err := a.fetchTaskLeaderboard(ctx)
+			if ctx.Err() != nil {
+				return
+			}
+			snapshot.usageFailed = err != nil
+			if err == nil {
+				snapshot.usage = next
+				nextUsage = time.Now().Add(benchmarkTTL)
+			} else {
+				log.Printf("Terminal-Bench task tokens: %v", err)
+				nextUsage = time.Now().Add(time.Hour)
 			}
 		}
-		if ctx.Err() != nil {
-			return
-		}
-		snapshot.usage = maps.Clone(usage)
 		a.mu.Lock()
 		a.benchmarks = snapshot
 		a.mu.Unlock()
-		timer.Reset(30 * time.Second)
+		timer.Reset(min(time.Until(nextScores), time.Until(nextUsage)))
 	}
-}
-
-func (a *App) benchmarkCatalog() ([]Model, map[string]ModelSetting) {
-	a.mu.Lock()
-	acc, ok := a.store.active()
-	models := a.models[acc.ID].Models
-	a.mu.Unlock()
-	if !ok {
-		return nil, nil
-	}
-	a.store.mu.Lock()
-	settings := maps.Clone(a.store.state.Models)
-	a.store.mu.Unlock()
-	return models, settings
 }
 
 func benchmarkName(name string) string {
@@ -253,7 +182,7 @@ func upstreamBenchmarkName(name string) string {
 	return benchmarkName(strings.TrimSuffix(strings.TrimSuffix(strings.ToLower(name), "__dev"), "__max"))
 }
 
-func (snapshot benchmarkSnapshot) match(model Model, max bool, effort string, aliases map[string]string) *benchmarkModel {
+func (snapshot benchmarkScores) match(model Model, max bool, effort string, aliases map[string]string) *benchmarkModel {
 	name := model.ModelName
 	if max && model.MaxModel != "" {
 		name = model.MaxModel
@@ -347,38 +276,44 @@ func (a *App) efficiency(models []Model, settings map[string]ModelSetting, snaps
 	if a.cfg.ArtificialAnalysisKey == "" {
 		return M{"status": "unconfigured"}
 	}
-	status := snapshot.status
-	if snapshot.updatedAt.IsZero() {
-		if status == "" {
-			status = "loading"
+	failed := snapshot.scoresFailed || snapshot.usageFailed
+	if snapshot.updatedAt.IsZero() || snapshot.usage == nil {
+		if failed {
+			return M{"status": "unavailable"}
 		}
-		return M{"status": status}
+		return M{"status": "loading"}
 	}
-	if status != "ready" {
+	status := "ready"
+	if failed {
 		status = "stale"
 	}
 	matches, enabled := a.benchmarkMatches(models, settings, snapshot)
-	candidates := []efficiencyCandidate{}
-	pending := false
-	usageFailed := false
+	byAgent := map[string][]efficiencyCandidate{}
 	for _, match := range matches {
 		rate, offPeak := match.pricing.rateAt(now)
 		if rate == nil {
 			continue
 		}
-		measurement, loaded := snapshot.usage[match.benchmark.ID]
-		pending = pending || !loaded
-		usageFailed = usageFailed || measurement.failed
-		if measurement.average <= 0 {
-			continue
-		}
 		candidate := match.candidate
 		candidate.Rate = *rate
 		candidate.OffPeak = offPeak
-		candidate.TokensPerTask = measurement.average
-		candidate.CostPerTask = candidate.Rate * measurement.average
-		if !math.IsInf(candidate.CostPerTask, 0) {
-			candidates = append(candidates, candidate)
+		for name, agent := range snapshot.usage {
+			average := agent.tokensFor(match.benchmark, candidate.Effort)
+			if average <= 0 {
+				continue
+			}
+			candidate.TokensPerTask = average
+			candidate.CostPerTask = candidate.Rate * average
+			if !math.IsInf(candidate.CostPerTask, 0) {
+				byAgent[name] = append(byAgent[name], candidate)
+			}
+		}
+	}
+	var agent string
+	candidates := []efficiencyCandidate{}
+	for name, group := range byAgent {
+		if len(group) > len(candidates) || (len(group) == len(candidates) && name < agent) {
+			agent, candidates = name, group
 		}
 	}
 	sort.Slice(candidates, func(i, j int) bool {
@@ -392,5 +327,5 @@ func (a *App) efficiency(models []Model, settings map[string]ModelSetting, snaps
 		return left.ID < right.ID
 	})
 	return M{"status": status, "updated_at": snapshot.updatedAt, "version": snapshot.version, "enabled": enabled,
-		"pending": pending, "usage_failed": usageFailed, "candidates": candidates}
+		"agent": snapshot.usage[agent].name, "candidates": candidates}
 }
