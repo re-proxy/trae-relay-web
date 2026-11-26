@@ -30,7 +30,7 @@ func TestModelEfficiencyUsesTaskTokensAndTraeRates(t *testing.T) {
 				return
 			}
 			w.Header().Set("Content-Type", "text/html")
-			_, _ = w.Write([]byte(`<script>"rows":[{"model":"verbose","tasks":129,"totalTokensM":3},{"model":"compact","tasks":129,"totalTokensM":1},{"model":"partial","tasks":12,"totalTokensM":0.2}]</script>`))
+			_, _ = w.Write([]byte(`<script>"rows":[{"model":"verbose","tasks":129,"totalTokensM":0.003},{"model":"compact","tasks":129,"totalTokensM":0.001},{"model":"partial","tasks":12,"totalTokensM":0.0002}]</script>`))
 			return
 		}
 		if r.Method != "GET" || r.Header.Get("x-api-key") != "benchmark-test-key" {

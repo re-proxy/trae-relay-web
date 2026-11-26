@@ -52,27 +52,25 @@ func (a *App) fetchTaskLeaderboard(ctx context.Context) (taskLeaderboard, error)
 	if err != nil {
 		return nil, err
 	}
-	var page struct {
-		Rows []struct {
-			Model        string  `json:"model"`
-			Tasks        int     `json:"tasks"`
-			TotalTokensM float64 `json:"totalTokensM"`
-		} `json:"rows"`
+	var rows []struct {
+		Model        string  `json:"model"`
+		Tasks        int     `json:"tasks"`
+		TotalTokensM float64 `json:"totalTokensM"`
 	}
 	body, err := a.benchmarkBody(req)
 	if err != nil {
 		return nil, err
 	}
-	if err := decodeRequestyRows(body, &page); err != nil {
+	if err := decodeRequestyRows(body, &rows); err != nil {
 		return nil, err
 	}
-	if len(page.Rows) == 0 {
+	if len(rows) == 0 {
 		return nil, errors.New("no Requesty coding benchmark token rows")
 	}
 	const agentName = "Requesty Coding Agent"
 	const agentKey = "requesty-coding-agent"
 	agent := taskAgent{name: agentName, usage: map[taskModel]taskMeasurement{}}
-	for _, row := range page.Rows {
+	for _, row := range rows {
 		if row.Model == "" || row.Tasks < 129 || row.TotalTokensM <= 0 {
 			continue
 		}
