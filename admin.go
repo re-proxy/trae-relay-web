@@ -214,7 +214,7 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 			ID      string       `json:"id"`
 			Setting ModelSetting `json:"setting"`
 		}
-		if decode(w, r, &b) != nil || b.ID == "" || len(b.Setting.Alias) > 120 {
+		if decode(w, r, &b) != nil || b.ID == "" || len(b.Setting.Alias) > 120 || len(b.Setting.BenchmarkID) > 180 || len(b.Setting.TaskAgentName) > 180 || len(b.Setting.TaskModelName) > 180 {
 			fail(w, 400, "invalid_model_setting")
 			return
 		}

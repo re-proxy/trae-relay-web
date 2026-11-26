@@ -71,6 +71,24 @@ func TestMultipleKeysMigrationAndRevocation(t *testing.T) {
 		t.Fatal("revoked key still accepted")
 	}
 }
+
+func TestModelBenchmarkMappingPersists(t *testing.T) {
+	a := testApp(t)
+	cookie := adminCookie(t, a)
+	setting := ModelSetting{Effort: "high", BenchmarkID: "aa-model-id", TaskAgentName: "terminal-agent", TaskModelName: "terminal-model"}
+	w := request(a, "POST", "/admin/model", M{"id": "upstream-model", "setting": setting}, "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	reopened, err := openStore(a.cfg.DataDir, a.cfg.MasterKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reopened.state.Models["upstream-model"]; got.BenchmarkID != setting.BenchmarkID || got.TaskAgentName != setting.TaskAgentName || got.TaskModelName != setting.TaskModelName || got.Effort != setting.Effort {
+		t.Fatalf("model mapping was not persisted: %+v", got)
+	}
+}
+
 func TestPersonalBalanceAndMetadataCheck(t *testing.T) {
 	a := testApp(t)
 	seed(t, a)

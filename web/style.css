@@ -143,6 +143,7 @@ code{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;fo
 .rates .detail strong{font-size:12.5px;font-weight:500;font-variant-numeric:tabular-nums}
 .rates .cond{flex-basis:100%;margin:0;font-size:10.5px;line-height:1.65;color:var(--dim-2)}
 .mFields{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.mFields>.fine{grid-column:1/-1;margin:2px 0 0}
 .mFields label{display:flex;flex-direction:column;gap:5px;min-width:0}
 .mFields label>span{font-size:10.5px;color:#7f8fa3}
 .mFields input,.mFields select{padding:7px 9px;font-size:12.5px}

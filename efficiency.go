@@ -28,6 +28,12 @@ type benchmarkModel struct {
 	} `json:"evaluations"`
 }
 
+type benchmarkModelOption struct {
+	ID           string  `json:"id"`
+	Name         string  `json:"name"`
+	Intelligence float64 `json:"intelligence"`
+}
+
 type benchmarkScores struct {
 	version   float64
 	updatedAt time.Time
@@ -206,6 +212,28 @@ func upstreamBenchmarkName(name string) string {
 }
 
 func (snapshot benchmarkScores) match(model Model, max bool, effort string, aliases map[string]string) *benchmarkModel {
+	return snapshot.matchMapped(model, max, effort, aliases, "")
+}
+
+func (snapshot benchmarkScores) modelOptions() []benchmarkModelOption {
+	options := []benchmarkModelOption{}
+	for _, row := range snapshot.byID {
+		if row == nil || row.Evaluations.Intelligence == nil {
+			continue
+		}
+		options = append(options, benchmarkModelOption{ID: row.ID, Name: row.Name, Intelligence: *row.Evaluations.Intelligence})
+	}
+	sort.Slice(options, func(i, j int) bool { return strings.ToLower(options[i].Name) < strings.ToLower(options[j].Name) })
+	return options
+}
+
+func (snapshot benchmarkScores) matchMapped(model Model, max bool, effort string, aliases map[string]string, mappedID string) *benchmarkModel {
+	if mappedID != "" {
+		if row := snapshot.byID[mappedID]; row != nil && row.Evaluations.Intelligence != nil {
+			return row
+		}
+		return nil
+	}
 	name := model.ModelName
 	if max && model.MaxModel != "" {
 		name = model.MaxModel
@@ -259,12 +287,15 @@ type efficiencyCandidate struct {
 	Effort        string  `json:"effort,omitempty"`
 	TokensPerTask float64 `json:"tokens_per_task"`
 	CostPerTask   float64 `json:"cost_per_task"`
+	TaskAgent     string  `json:"task_agent,omitempty"`
 }
 
 type benchmarkMatch struct {
 	candidate efficiencyCandidate
 	benchmark *benchmarkModel
 	pricing   *ModelPricing
+	taskAgent string
+	taskModel string
 }
 
 func (a *App) benchmarkMatches(models []Model, settings map[string]ModelSetting, snapshot benchmarkSnapshot) ([]benchmarkMatch, int) {
@@ -285,7 +316,7 @@ func (a *App) benchmarkMatches(models []Model, settings map[string]ModelSetting,
 			continue
 		}
 		effort, _ := selectedReasoningEffort(model, setting, "")
-		row := snapshot.match(model, max, effort, a.cfg.ArtificialAnalysisAliases)
+		row := snapshot.matchMapped(model, max, effort, a.cfg.ArtificialAnalysisAliases, setting.BenchmarkID)
 		if row == nil || row.Evaluations.Intelligence == nil {
 			continue
 		}
@@ -296,6 +327,8 @@ func (a *App) benchmarkMatches(models []Model, settings map[string]ModelSetting,
 			},
 			benchmark: row,
 			pricing:   pricing,
+			taskAgent: setting.TaskAgentName,
+			taskModel: setting.TaskModelName,
 		})
 	}
 	return matches, enabled
@@ -318,6 +351,7 @@ func (a *App) efficiency(models []Model, settings map[string]ModelSetting, snaps
 	}
 	matches, enabled := a.benchmarkMatches(models, settings, snapshot)
 	byAgent := map[string][]efficiencyCandidate{}
+	manualCandidates := []efficiencyCandidate{}
 	for _, match := range matches {
 		rate, offPeak := match.pricing.rateAt(now)
 		if rate == nil {
@@ -326,23 +360,50 @@ func (a *App) efficiency(models []Model, settings map[string]ModelSetting, snaps
 		candidate := match.candidate
 		candidate.Rate = *rate
 		candidate.OffPeak = offPeak
+		if match.taskAgent != "" {
+			agent, ok := snapshot.usage[match.taskAgent]
+			if !ok {
+				continue
+			}
+			average := agent.tokensForMapped(match.benchmark, match.taskModel, candidate.Effort)
+			if average <= 0 {
+				continue
+			}
+			candidate.TaskAgent = agent.name
+			candidate.TokensPerTask = average
+			candidate.CostPerTask = candidate.Rate * average
+			if !math.IsInf(candidate.CostPerTask, 0) {
+				manualCandidates = append(manualCandidates, candidate)
+			}
+			continue
+		}
 		for name, agent := range snapshot.usage {
-			average := agent.tokensFor(match.benchmark, candidate.Effort)
+			average := agent.tokensForMapped(match.benchmark, match.taskModel, candidate.Effort)
 			if average <= 0 {
 				continue
 			}
 			candidate.TokensPerTask = average
 			candidate.CostPerTask = candidate.Rate * average
+			candidate.TaskAgent = agent.name
 			if !math.IsInf(candidate.CostPerTask, 0) {
 				byAgent[name] = append(byAgent[name], candidate)
 			}
 		}
 	}
 	var agent string
-	candidates := []efficiencyCandidate{}
+	autoCandidates := []efficiencyCandidate{}
 	for name, group := range byAgent {
-		if len(group) > len(candidates) || (len(group) == len(candidates) && name < agent) {
-			agent, candidates = name, group
+		if len(group) > len(autoCandidates) || (len(group) == len(autoCandidates) && name < agent) {
+			agent, autoCandidates = name, group
+		}
+	}
+	candidates := append(manualCandidates, autoCandidates...)
+	agentLabel := snapshot.usage[agent].name
+	if len(manualCandidates) > 0 {
+		if len(autoCandidates) > 0 {
+			agentLabel = "自动匹配与手动指定 Agent"
+		} else {
+			agentLabel = "手动指定 Agent"
 		}
 	}
 	sort.Slice(candidates, func(i, j int) bool {
@@ -356,5 +417,6 @@ func (a *App) efficiency(models []Model, settings map[string]ModelSetting, snaps
 		return left.ID < right.ID
 	})
 	return M{"status": status, "updated_at": snapshot.updatedAt, "version": snapshot.version, "enabled": enabled,
-		"agent": snapshot.usage[agent].name, "candidates": candidates}
+		"agent": agentLabel, "candidates": candidates,
+		"benchmark_options": snapshot.benchmarkScores.modelOptions(), "task_model_options": snapshot.usage.modelOptions()}
 }

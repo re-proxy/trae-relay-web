@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -26,6 +27,15 @@ type taskModel struct {
 type taskMeasurement struct {
 	average   float64
 	updatedAt time.Time
+	label     string
+}
+
+type taskModelOption struct {
+	AgentID string   `json:"agent_id"`
+	Agent   string   `json:"agent"`
+	Name    string   `json:"name"`
+	Label   string   `json:"label"`
+	Efforts []string `json:"efforts"`
 }
 
 func (a *App) fetchTaskLeaderboard(ctx context.Context) (taskLeaderboard, error) {
@@ -105,7 +115,51 @@ func (agents taskLeaderboard) add(row taskLeaderboardRow) {
 	agent.usage[key] = taskMeasurement{
 		average:   float64(row.Metrics.Tokens) / float64(row.Metrics.Trials),
 		updatedAt: row.UpdatedAt,
+		label:     strings.TrimSpace(row.Metadata.Model.Label),
 	}
+}
+
+func (data taskLeaderboard) modelOptions() []taskModelOption {
+	type optionState struct {
+		agent   string
+		label   string
+		efforts map[string]bool
+	}
+	options := map[string]*optionState{}
+	for agentName, agent := range data {
+		for key, measurement := range agent.usage {
+			optionKey := agentName + "\x00" + key.name
+			option := options[optionKey]
+			if option == nil {
+				option = &optionState{agent: agent.name, label: measurement.label, efforts: map[string]bool{}}
+				options[optionKey] = option
+			}
+			if measurement.label != "" {
+				option.label = measurement.label
+			}
+			option.efforts[key.effort] = true
+		}
+	}
+	result := make([]taskModelOption, 0, len(options))
+	for key, option := range options {
+		efforts := make([]string, 0, len(option.efforts))
+		for effort := range option.efforts {
+			efforts = append(efforts, effort)
+		}
+		parts := strings.SplitN(key, "\x00", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		result = append(result, taskModelOption{AgentID: parts[0], Agent: option.agent, Name: parts[1], Label: option.label, Efforts: efforts})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		left, right := strings.ToLower(result[i].Agent+" "+result[i].Label), strings.ToLower(result[j].Agent+" "+result[j].Label)
+		return left < right
+	})
+	for i := range result {
+		sort.Strings(result[i].Efforts)
+	}
+	return result
 }
 
 func taskModelName(name string) string {
@@ -119,9 +173,19 @@ func taskModelName(name string) string {
 }
 
 func (agent taskAgent) tokensFor(model *benchmarkModel, effort string) float64 {
+	return agent.tokensForMapped(model, "", effort)
+}
+
+func (agent taskAgent) tokensForMapped(model *benchmarkModel, mappedName, effort string) float64 {
 	effort = benchmarkName(effort)
 	if effort == "" {
 		effort = "none"
+	}
+	if mappedName != "" {
+		if measurement, ok := agent.usage[taskModel{taskModelName(mappedName), effort}]; ok {
+			return measurement.average
+		}
+		return 0
 	}
 	name := strings.TrimSpace(model.Name)
 	if start := strings.LastIndex(name, " ("); start >= 0 && strings.HasSuffix(name, ")") {

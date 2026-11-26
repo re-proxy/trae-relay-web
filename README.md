@@ -121,6 +121,8 @@ Trae 目录提供闲时倍率和有效时间窗时，按北京时间判断是否
 
 参与比较的模型还需要匹配的评分、模型版本和思考档位用量。自动匹配使用上游模型名、目录 ID 或显示名及思考档位。上游命名与 Artificial Analysis 不同时，可用 `ARTIFICIAL_ANALYSIS_MODEL_MAP` 指定匹配，例如 `'{"model__dev@high":"benchmark-id-or-slug"}'`。键使用上游请求的模型名和实际发送的思考档位（无思考档位时省略 `@...`），值优先使用评测 ID，也支持唯一的 slug。
 
+也可在模型列表中展开「匹配与偏好」，分别选择 Artificial Analysis 评分型号与 Terminal-Bench Agent / 任务型号，再点击「保存偏好」。留空会继续自动匹配；手动匹配保存在加密状态文件中，重启后仍然有效。任务选项会标出该 Agent 下已有的思考档位。手动指定 Agent 后，该模型不受自动匹配的共同 Agent 限制。
+
 ## 给下游 router 查询余额
 
 使用与聊天相同的 API Key 调用 `GET /v1/balance`，读取 `balance`（单位 `credits`，个人积分合计），并检查 `complete`。支持 Bearer / X-API-Key，默认缓存 60 秒；部分查询失败会标记不完整，未知余额返回 `null`，企业套餐额度单列、不当作剩余积分合计。

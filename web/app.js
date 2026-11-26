@@ -227,7 +227,7 @@ const identity=el('div');
 identity.append(el('h3',winner.name),el('code',winner.id));
 const cost=el('div',undefined,'efficiencyRate');
 cost.append(el('span','每任务预估消耗'),el('strong',usage.format(winner.cost_per_task)));
-const details=[winner.max?'Max':'标准',winner.effort&&'思考 '+winner.effort,'Intelligence '+fmt(winner.intelligence),usage.format(winner.tokens_per_task)+' Token/任务 × '+rateText(winner.rate)+(winner.off_peak?' 闲时':' 常规')];
+const details=[winner.max?'Max':'标准',winner.effort&&'思考 '+winner.effort,'Intelligence '+fmt(winner.intelligence),usage.format(winner.tokens_per_task)+' Token/任务 × '+rateText(winner.rate)+(winner.off_peak?' 闲时':' 常规'),'Terminal-Bench · '+winner.task_agent];
 result.replaceChildren(identity,cost,el('p',details.filter(Boolean).join(' · '),'fine'));
 }
 slider.oninput=recommend;
@@ -262,7 +262,7 @@ const q=view.q;
 if(q&&!(m.display_name+' '+m.id+' '+(m.provider||'')).toLowerCase().includes(q))return false;
 switch(view.filter){case 'enabled':return !(s.settings[m.id]||{}).disabled;case 'vision':return !!m.vision;case 'reasoning':return !!(m.efforts&&m.efforts.length);case 'max':return !!m.max;default:return true;}
 };
-const snapshot=m=>{const st=s.settings[m.id]||{};return {disabled:!!st.disabled,alias:st.alias||'',effort:st.effort||'',max:!!st.max};};
+const snapshot=m=>{const st=s.settings[m.id]||{};return {disabled:!!st.disabled,alias:st.alias||'',effort:st.effort||'',max:!!st.max,benchmark_id:st.benchmark_id||'',task_agent_name:st.task_agent_name||'',task_model_name:st.task_model_name||''};};
 function paint(){
 grid.textContent='';
 const shown=s.models.filter(matches);
@@ -272,7 +272,7 @@ for(const m of shown)grid.append(modelCard(m));
 }
 function modelCard(m){
 const draft=modelDrafts.get(m.id)||snapshot(m),st=draft;
-const original=snapshot(m),initialDirty=['disabled','alias','effort','max'].some(k=>st[k]!==original[k]);
+const original=snapshot(m),initialDirty=['disabled','alias','effort','max','benchmark_id','task_agent_name','task_model_name'].some(k=>st[k]!==original[k]);
 const card=el('article',undefined,st.disabled?'mCard off':'mCard');
 const head=el('div',undefined,'mHead'),title=el('div',undefined,'mTitle');
 title.append(el('small',(m.provider||'上游目录')+' · '+m.function),el('h3',m.display_name),el('code',m.id));
@@ -291,25 +291,42 @@ const aliasField=el('label'),alias=el('input');alias.value=st.alias;alias.placeh
 const effortField=el('label'),effort=el('select');effort.setAttribute('aria-label',m.display_name+' 思考档位');const def=el('option','跟随默认');def.value='';effort.append(def);for(const e of m.efforts||[]){const o=el('option',e);o.value=e;effort.append(o);}effort.value=st.effort;effortField.append(el('span','思考档位'),effort);
 fields.append(aliasField,effortField);
 
+const mappingTitle=el('p','评测映射（留空时自动匹配）','fine');
+const benchmarkField=el('label'),benchmark=el('select');benchmark.setAttribute('aria-label',m.display_name+' Intelligence 评分映射');
+const autoBenchmark=el('option','自动匹配');autoBenchmark.value='';benchmark.append(autoBenchmark);
+for(const option of s.efficiency?.benchmark_options||[]){const item=el('option',option.name+' · '+fmt(option.intelligence));item.value=option.id;benchmark.append(item);}
+if(st.benchmark_id&&!Array.from(benchmark.options).some(option=>option.value===st.benchmark_id)){const item=el('option','已保存映射 · '+st.benchmark_id);item.value=st.benchmark_id;benchmark.append(item);}
+benchmark.value=st.benchmark_id;benchmarkField.append(el('span','Intelligence 评分型号'),benchmark);
+const taskField=el('label'),taskModel=el('select');taskModel.setAttribute('aria-label',m.display_name+' 任务 Token 映射');
+const autoTask=el('option','自动匹配');autoTask.value='';taskModel.append(autoTask);
+for(const option of s.efficiency?.task_model_options||[]){const efforts=(option.efforts||[]).join('/');const label=option.agent+' · '+option.label+(efforts?' · '+efforts:'');const item=el('option',label);item.value=JSON.stringify([option.agent_id,option.name]);taskModel.append(item);}
+const savedTaskMapping=st.task_agent_name&&st.task_model_name?JSON.stringify([st.task_agent_name,st.task_model_name]):'';
+if(savedTaskMapping&&!Array.from(taskModel.options).some(option=>option.value===savedTaskMapping)){const item=el('option','已保存映射 · '+st.task_agent_name+' / '+st.task_model_name);item.value=savedTaskMapping;taskModel.append(item);}
+taskModel.value=savedTaskMapping;taskField.append(el('span','Terminal-Bench Agent / Token 型号'),taskModel);
+const selectedTaskMapping=()=>{try{return taskModel.value?JSON.parse(taskModel.value):['',''];}catch{return['',''];}};
+fields.append(mappingTitle,benchmarkField,taskField);
+
 
 const maxLabel=el('label',undefined,'switch'+(m.max?'':' off')),maxBox=el('input');maxBox.type='checkbox';maxBox.checked=st.max;maxBox.disabled=!m.max;maxBox.setAttribute('aria-label',m.display_name+' Max 模式');maxLabel.append(maxBox,el('span','Max 模式'));
 const bottom=el('div',undefined,'mBottom'),hint=el('span',initialDirty?'未保存':'','draft');const save=button('保存偏好',async()=>{
-const saved={disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:maxBox.checked};
+const [taskAgentName,taskModelName]=selectedTaskMapping();
+const saved={disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:maxBox.checked,benchmark_id:benchmark.value,task_agent_name:taskAgentName,task_model_name:taskModelName};
 await api('model',{id:m.id,setting:saved});
 s.settings={...s.settings,[m.id]:saved};if(S&&S!==s)S.settings={...S.settings,[m.id]:saved};
-const edited={disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:maxBox.checked};
+const edited={disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:maxBox.checked,benchmark_id:benchmark.value,task_agent_name:taskAgentName,task_model_name:taskModelName};
 if(Object.keys(saved).some(key=>saved[key]!==edited[key]))modelDrafts.set(m.id,edited);else modelDrafts.delete(m.id);
 notice('已保存 '+m.display_name+' 的偏好');paint();
 await refresh();
 });
 save.disabled=!initialDirty;
 const editor=el('div',undefined,'mEditor');editor.id='model-editor-'+encodeURIComponent(m.id);editor.hidden=!modelExpanded.has(m.id);editor.append(fields,maxLabel);
-const expand=el('button',editor.hidden?'偏好 ▾':'收起 ▴');expand.type='button';expand.setAttribute('aria-label',m.display_name+' 偏好');expand.setAttribute('aria-controls',editor.id);expand.setAttribute('aria-expanded',String(!editor.hidden));expand.onclick=()=>{editor.hidden=!editor.hidden;if(editor.hidden)modelExpanded.delete(m.id);else modelExpanded.add(m.id);expand.textContent=editor.hidden?'偏好 ▾':'收起 ▴';expand.setAttribute('aria-expanded',String(!editor.hidden));};
+const expand=el('button',editor.hidden?'匹配与偏好 ▾':'收起 ▴');expand.type='button';expand.setAttribute('aria-label',m.display_name+' 匹配与偏好');expand.setAttribute('aria-controls',editor.id);expand.setAttribute('aria-expanded',String(!editor.hidden));expand.onclick=()=>{editor.hidden=!editor.hidden;if(editor.hidden)modelExpanded.delete(m.id);else modelExpanded.add(m.id);expand.textContent=editor.hidden?'匹配与偏好 ▾':'收起 ▴';expand.setAttribute('aria-expanded',String(!editor.hidden));};
 bottom.append(toggle,hint,save,expand);
 
 const touch=()=>{
-const base=snapshot(m),next={disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:maxBox.checked};
-const dirty=next.disabled!==base.disabled||next.alias!==base.alias||next.effort!==base.effort||next.max!==base.max;
+const [taskAgentName,taskModelName]=selectedTaskMapping();
+const base=snapshot(m),next={disabled:!enabled.checked,alias:alias.value,effort:effort.value,max:maxBox.checked,benchmark_id:benchmark.value,task_agent_name:taskAgentName,task_model_name:taskModelName};
+const dirty=Object.keys(next).some(key=>next[key]!==base[key]);
 if(dirty)modelDrafts.set(m.id,next);else modelDrafts.delete(m.id);
 toggle.lastChild.textContent=next.disabled?'已停用':'启用';
 card.className=next.disabled?'mCard off':'mCard';
@@ -322,7 +339,7 @@ function paint2(m,next,tagsNode,cardNode){
 tagsNode.firstChild.textContent=next.max&&m.max?'Max':'标准';
 const old=cardNode.querySelector('.rates');if(old)old.replaceWith(pricingPanel(m,next.max&&m.max));
 }
-enabled.onchange=touch;maxBox.onchange=touch;alias.oninput=touch;effort.onchange=touch;
+enabled.onchange=touch;maxBox.onchange=touch;alias.oninput=touch;effort.onchange=touch;benchmark.onchange=touch;taskModel.onchange=touch;
 card.append(bottom,editor);
 return card;
 }

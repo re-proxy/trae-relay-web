@@ -193,3 +193,26 @@ func TestBenchmarkNamesIgnoreDefaultFallbackQualifier(t *testing.T) {
 		t.Fatalf("expected task token row after stripping fallback qualifier, got %v", got)
 	}
 }
+
+func TestEfficiencyUsesSavedManualMappings(t *testing.T) {
+	a := &App{cfg: Config{ArtificialAnalysisKey: "benchmark-test-key"}}
+	rate, intelligence := 0.2, 48.0
+	model := Model{ID: "upstream-model", Name: "Upstream Display", ModelName: "opaque-model__dev", Pricing: &ModelPricing{Standard: &rate}, Efforts: []string{"high"}, DefaultEffort: "high"}
+	benchmark := &benchmarkModel{ID: "aa-id", Name: "Unrelated AA Name"}
+	benchmark.Evaluations.Intelligence = &intelligence
+	snapshot := benchmarkSnapshot{
+		benchmarkScores: benchmarkScores{version: 5, updatedAt: time.Now(), byID: map[string]*benchmarkModel{"aa-id": benchmark}},
+		usage: taskLeaderboard{"agent": {name: "Agent", usage: map[taskModel]taskMeasurement{
+			{"terminal-bench-name", "high"}: {average: 1234},
+		}}},
+	}
+	settings := map[string]ModelSetting{"upstream-model": {Effort: "high", BenchmarkID: "aa-id", TaskAgentName: "agent", TaskModelName: "terminal-bench-name"}}
+	result := a.efficiency([]Model{model}, settings, snapshot, time.Now())
+	candidates := result["candidates"].([]efficiencyCandidate)
+	if len(candidates) != 1 || candidates[0].Intelligence != intelligence || candidates[0].TokensPerTask != 1234 || candidates[0].CostPerTask != 246.8 || candidates[0].TaskAgent != "Agent" {
+		t.Fatalf("saved manual mappings were not applied: %+v", result)
+	}
+	if len(result["benchmark_options"].([]benchmarkModelOption)) != 1 || len(result["task_model_options"].([]taskModelOption)) != 1 {
+		t.Fatalf("mapping choices missing from state: %+v", result)
+	}
+}

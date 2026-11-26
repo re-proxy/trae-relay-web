@@ -44,10 +44,13 @@ type APIKey struct {
 	Created time.Time `json:"created"`
 }
 type ModelSetting struct {
-	Disabled bool   `json:"disabled"`
-	Alias    string `json:"alias"`
-	Effort   string `json:"effort"`
-	Max      bool   `json:"max"`
+	Disabled      bool   `json:"disabled"`
+	Alias         string `json:"alias"`
+	Effort        string `json:"effort"`
+	Max           bool   `json:"max"`
+	BenchmarkID   string `json:"benchmark_id,omitempty"`
+	TaskAgentName string `json:"task_agent_name,omitempty"`
+	TaskModelName string `json:"task_model_name,omitempty"`
 }
 type Usage struct {
 	Time       time.Time `json:"time"`
