@@ -115,7 +115,7 @@ curl http://192.168.1.10:8317/v1/models \
 
 在 [Artificial Analysis](https://artificialanalysis.ai/api-reference) 生成免费 API Key，填入服务端 `.env` 的 `ARTIFICIAL_ANALYSIS_API_KEY`，再执行 `docker compose up -d --build`。评分来自免费 Intelligence Index API，Token 用量来自 [Requesty Coding Benchmark](https://www.requesty.ai/coding-benchmark) 的公开编码 Agent 榜单。服务端每 6 小时刷新两项数据，同步失败时继续使用上次成功的数据。榜单按统一 Agent 配置跑 129 个任务，公开每个型号的平均 Token 数；数据代表榜单默认配置，不区分模型的思考档位。只有榜单实际评测过的型号会有 Token 用量记录。
 
-在「模型」页拖动「最低 Intelligence」滑块，即可找到达到门槛且每任务预估消耗最低的已启用模型。推荐使用已保存的 Max 与思考档位。榜单平均 Token 数乘以该档位对应上游的 Trae 倍率，得到每任务成本估算。由于公开源没有各思考档位的分项 Token 数，不同档位暂用同一型号的默认配置均值；预估消耗相同时优先推荐 Intelligence 更高的模型。实际扣费随任务、缓存和折扣变化。
+此功能默认关闭。在「模型」页开启「每任务建议」后，拖动「最低 Intelligence」滑块即可找到达到门槛且每任务预估消耗最低的已启用模型；关闭时会隐藏成本建议和评测映射，也会暂停评测数据同步。开关状态会加密保存。推荐使用已保存的 Max 与思考档位。榜单平均 Token 数乘以该档位对应上游的 Trae 倍率，得到每任务成本估算。由于公开源没有各思考档位的分项 Token 数，不同档位暂用同一型号的默认配置均值；预估消耗相同时优先推荐 Intelligence 更高的模型。实际扣费随任务、缓存和折扣变化。
 
 Trae 目录提供闲时倍率和有效时间窗时，按北京时间判断是否使用非会员闲时价，其余时段采用目录常规倍率。缺少当前时段倍率的模型会跳过。模型列表显示目录中的忙时、闲时和会员倍率。
 

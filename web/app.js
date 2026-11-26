@@ -37,7 +37,7 @@ const page=currentPage().id;
 if((page==='accounts'&&authorization)||(page==='keys'&&pinnedKey)||(page==='models'&&modelDrafts.size)||interactionDepth||content.contains(document.activeElement))return false;
 return !Array.from(content.querySelectorAll('.keyForm input')).some(input=>input.value.trim());
 }
-function pageData(state,page){if(page==='accounts')return [state.accounts,state.checkin_enabled,state.checkin_at];if(page==='models')return [state.models,state.settings,state.efficiency];if(page==='keys')return state.keys;return state.usage;}
+function pageData(state,page){if(page==='accounts')return [state.accounts,state.checkin_enabled,state.checkin_at];if(page==='models')return [state.models,state.settings,state.efficiency_enabled,state.efficiency];if(page==='keys')return state.keys;return state.usage;}
 async function autoRefresh(signal){
 const version=sessionVersion,revision=uiRevision;
 if(S.accounts.some(account=>account.enabled)&&Date.now()-lastBalanceAttempt>=60000){
@@ -240,9 +240,11 @@ return box;
 function modelsPage(page){
 const root=el('div',undefined,'page'),s=S;
 const refreshCatalog=async()=>{notice('正在请求上游模型目录…');await api('models/refresh',{});notice('模型目录已更新');await refresh();};
-root.append(pageHead(page,s.models.length?s.models.length+' 个可选':'',[button('刷新',refresh),button('刷新模型目录',refreshCatalog,'primary')]));
+const efficiencyToggle=el('label',undefined,'switch'),efficiencyCheck=el('input');efficiencyCheck.type='checkbox';efficiencyCheck.checked=!!s.efficiency_enabled;efficiencyCheck.setAttribute('aria-label','启用最低每任务预估消耗');efficiencyToggle.append(efficiencyCheck,el('span',s.efficiency_enabled?'每任务建议已开启':'每任务建议已关闭'));
+efficiencyCheck.onchange=()=>action(async()=>{const enabled=efficiencyCheck.checked;efficiencyCheck.disabled=true;try{await api('efficiency',{enabled});await refresh();notice(enabled?'已开启每任务建议':'已关闭每任务建议');}catch(error){efficiencyCheck.checked=!!S?.efficiency_enabled;efficiencyCheck.disabled=false;throw error;}});
+root.append(pageHead(page,s.models.length?s.models.length+' 个可选':'',[button('刷新',refresh),button('刷新模型目录',refreshCatalog,'primary'),efficiencyToggle]));
 if(!s.models.length){root.append(emptyBox('模型目录还没有加载','模型清单来自启用账号的实时上游目录，未加载前不会提供虚构模型。',['确认至少一个账号已启用','点击「刷新模型目录」向上游读取','读取失败会保留上次成功的目录']));return root;}
-root.append(efficiencyPanel(s.efficiency));
+if(s.efficiency_enabled)root.append(efficiencyPanel(s.efficiency));
 
 const view=modelView;
 const bar=el('div',undefined,'toolbar');
@@ -304,7 +306,7 @@ const savedTaskMapping=st.task_agent_name&&st.task_model_name?JSON.stringify([st
 if(savedTaskMapping&&!Array.from(taskModel.options).some(option=>option.value===savedTaskMapping)){const item=el('option','已保存映射 · '+st.task_agent_name+' / '+st.task_model_name);item.value=savedTaskMapping;taskModel.append(item);}
 taskModel.value=savedTaskMapping;taskField.append(el('span','任务榜单 Agent / Token 型号'),taskModel);
 const selectedTaskMapping=()=>{try{return taskModel.value?JSON.parse(taskModel.value):['',''];}catch{return['',''];}};
-fields.append(mappingTitle,benchmarkField,taskField);
+const efficiencyFields=el('div',undefined,'efficiencyFields');efficiencyFields.hidden=!s.efficiency_enabled;efficiencyFields.append(mappingTitle,benchmarkField,taskField);fields.append(efficiencyFields);
 
 
 const maxLabel=el('label',undefined,'switch'+(m.max?'':' off')),maxBox=el('input');maxBox.type='checkbox';maxBox.checked=st.max;maxBox.disabled=!m.max;maxBox.setAttribute('aria-label',m.display_name+' Max 模式');maxLabel.append(maxBox,el('span','Max 模式'));

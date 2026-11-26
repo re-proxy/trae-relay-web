@@ -90,6 +90,7 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 			settings[k] = v
 		}
 		usage := append([]Usage{}, a.store.state.Usage...)
+		efficiencyEnabled := a.store.state.EfficiencyEnabled
 		keys := []M{}
 		for _, k := range a.store.keysLocked() {
 			keys = append(keys, M{"id": k.ID, "name": k.Name, "enabled": k.Enabled, "suffix": suffix(k.Secret), "created": k.Created})
@@ -106,7 +107,32 @@ func (a *App) admin(w http.ResponseWriter, r *http.Request) {
 		}
 		benchmarks := a.benchmarks
 		a.mu.Unlock()
-		writeJSON(w, 200, M{"accounts": accounts, "models": models, "settings": settings, "efficiency": a.efficiency(models, settings, benchmarks, time.Now()), "usage": usage, "keys": keys, "in_flight": inflight, "api_key_suffix": suffix(a.store.apiKey()), "version": "0.1.0", "checkin_enabled": a.cfg.CheckinEnabled, "checkin_at": fmt.Sprintf("%02d:%02d", a.cfg.CheckinHour, a.cfg.CheckinMinute)})
+		efficiency := M{"status": "disabled"}
+		if efficiencyEnabled {
+			efficiency = a.efficiency(models, settings, benchmarks, time.Now())
+		}
+		writeJSON(w, 200, M{"accounts": accounts, "models": models, "settings": settings, "efficiency_enabled": efficiencyEnabled, "efficiency": efficiency, "usage": usage, "keys": keys, "in_flight": inflight, "api_key_suffix": suffix(a.store.apiKey()), "version": "0.1.0", "checkin_enabled": a.cfg.CheckinEnabled, "checkin_at": fmt.Sprintf("%02d:%02d", a.cfg.CheckinHour, a.cfg.CheckinMinute)})
+	case r.URL.Path == "/admin/efficiency" && r.Method == "POST":
+		var b struct {
+			Enabled bool `json:"enabled"`
+		}
+		if decode(w, r, &b) != nil {
+			fail(w, 400, "invalid_efficiency_setting")
+			return
+		}
+		a.store.mu.Lock()
+		changed := a.store.state.EfficiencyEnabled != b.Enabled
+		a.store.state.EfficiencyEnabled = b.Enabled
+		err := a.store.saveLocked()
+		a.store.mu.Unlock()
+		if err != nil {
+			fail(w, 500, "storage_write_failed")
+			return
+		}
+		if changed {
+			a.wakeBenchmarkWorker()
+		}
+		writeJSON(w, 200, M{"ok": true, "enabled": b.Enabled})
 	case r.URL.Path == "/admin/account/check" && r.Method == "POST":
 		a.accountInspect(w, r, false)
 	case r.URL.Path == "/admin/account/balance" && r.Method == "POST":

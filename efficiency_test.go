@@ -22,6 +22,7 @@ func TestModelEfficiencyUsesTaskTokensAndTraeRates(t *testing.T) {
 	}, time.Now()}
 	a.store.state.Models["compact"] = ModelSetting{Max: true, Effort: "high"}
 	a.store.state.Models["disabled"] = ModelSetting{Disabled: true}
+	a.store.state.EfficiencyEnabled = true
 	fixture(t, a, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/coding-benchmark" {
 			if r.Method != "GET" || r.Header.Get("x-api-key") != "" || r.Header.Get("Authorization") != "" {

@@ -168,9 +168,26 @@ func (a *App) benchmarkWorker(ctx context.Context) {
 	var snapshot benchmarkSnapshot
 	var nextScores, nextUsage time.Time
 	for {
+		if !a.efficiencyEnabled() {
+			snapshot = benchmarkSnapshot{}
+			nextScores, nextUsage = time.Time{}, time.Time{}
+			a.mu.Lock()
+			a.benchmarks = snapshot
+			a.mu.Unlock()
+			timer.Stop()
+			select {
+			case <-ctx.Done():
+				return
+			case <-a.benchmarkWake:
+				timer.Reset(0)
+				continue
+			}
+		}
 		select {
 		case <-ctx.Done():
 			return
+		case <-a.benchmarkWake:
+			continue
 		case <-timer.C:
 		}
 		now := time.Now()
@@ -206,6 +223,22 @@ func (a *App) benchmarkWorker(ctx context.Context) {
 		a.benchmarks = snapshot
 		a.mu.Unlock()
 		timer.Reset(min(time.Until(nextScores), time.Until(nextUsage)))
+	}
+}
+
+func (a *App) efficiencyEnabled() bool {
+	a.store.mu.Lock()
+	defer a.store.mu.Unlock()
+	return a.store.state.EfficiencyEnabled
+}
+
+func (a *App) wakeBenchmarkWorker() {
+	if a.benchmarkWake == nil {
+		return
+	}
+	select {
+	case a.benchmarkWake <- struct{}{}:
+	default:
 	}
 }
 

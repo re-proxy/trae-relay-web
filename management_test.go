@@ -89,6 +89,27 @@ func TestModelBenchmarkMappingPersists(t *testing.T) {
 	}
 }
 
+func TestEfficiencySettingPersists(t *testing.T) {
+	a := testApp(t)
+	cookie := adminCookie(t, a)
+	w := request(a, "GET", "/admin/state", nil, "", cookie)
+	var state M
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &state) != nil || state["efficiency_enabled"] != false {
+		t.Fatalf("feature should be disabled by default: %d %s", w.Code, w.Body.String())
+	}
+	w = request(a, "POST", "/admin/efficiency", M{"enabled": true}, "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("cannot enable feature: %d %s", w.Code, w.Body.String())
+	}
+	reopened, err := openStore(a.cfg.DataDir, a.cfg.MasterKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reopened.state.EfficiencyEnabled {
+		t.Fatal("feature setting was not persisted")
+	}
+}
+
 func TestPersonalBalanceAndMetadataCheck(t *testing.T) {
 	a := testApp(t)
 	seed(t, a)

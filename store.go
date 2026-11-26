@@ -61,11 +61,12 @@ type Usage struct {
 	DurationMS int64     `json:"duration_ms"`
 }
 type State struct {
-	Accounts []Account               `json:"accounts"`
-	APIKey   string                  `json:"api_key"`
-	Keys     []APIKey                `json:"keys,omitempty"`
-	Models   map[string]ModelSetting `json:"models"`
-	Usage    []Usage                 `json:"usage"`
+	Accounts          []Account               `json:"accounts"`
+	APIKey            string                  `json:"api_key"`
+	Keys              []APIKey                `json:"keys,omitempty"`
+	Models            map[string]ModelSetting `json:"models"`
+	Usage             []Usage                 `json:"usage"`
+	EfficiencyEnabled bool                    `json:"efficiency_enabled,omitempty"`
 }
 type Store struct {
 	mu    sync.Mutex
