@@ -60,7 +60,7 @@ func TestModelEfficiencyUsesTaskTokensAndTraeRates(t *testing.T) {
 			]}`))
 		case "/api/v2/language/models/free?page=2":
 			_, _ = w.Write([]byte(`{"intelligence_index_version":5,"pagination":{"page":2,"total_pages":2,"has_more":false},"data":[
-				{"id":"c-high","name":"Compact (High)","slug":"compact-high","evaluations":{"artificial_analysis_intelligence_index":33.5}},
+				{"id":"c-high","name":"Compact (High, Default Fallback)","slug":"compact-high","evaluations":{"artificial_analysis_intelligence_index":33.5}},
 				{"id":"m","name":"Missing","slug":"missing","evaluations":{"artificial_analysis_intelligence_index":20}}
 			]}`))
 		default:
@@ -174,5 +174,22 @@ func TestBenchmarkMatchFallsBackToGenericScoreAfterEffortSpecific(t *testing.T) 
 	delete(snapshot.byName, "model-high")
 	if got := snapshot.match(model, false, "high", nil); got != generic {
 		t.Fatalf("expected generic score fallback, got %+v", got)
+	}
+}
+
+func TestBenchmarkNamesIgnoreDefaultFallbackQualifier(t *testing.T) {
+	row := &benchmarkModel{ID: "fable-max", Name: "Claude Fable 5.2 (Max, Default Fallback)"}
+	index := map[string]*benchmarkModel{}
+	indexBenchmarkModelName(index, row.Name, row)
+	snapshot := benchmarkScores{byName: index}
+	model := Model{ID: "fable", ModelName: "claude-fable-5-2__dev"}
+	if got := snapshot.match(model, false, "max", nil); got != row {
+		t.Fatalf("expected AA Max row despite fallback qualifier, got %+v", got)
+	}
+	agent := taskAgent{usage: map[taskModel]taskMeasurement{
+		{"fable-5-2", "max"}: {average: 1234},
+	}}
+	if got := agent.tokensFor(row, "max"); got != 1234 {
+		t.Fatalf("expected task token row after stripping fallback qualifier, got %v", got)
 	}
 }

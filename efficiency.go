@@ -101,7 +101,7 @@ func (a *App) fetchBenchmarks(ctx context.Context) (benchmarkScores, error) {
 			}
 			snapshot.byID[row.ID] = row
 			indexBenchmark(snapshot.bySlug, row.Slug, row)
-			indexBenchmark(snapshot.byName, benchmarkName(row.Name), row)
+			indexBenchmarkModelName(snapshot.byName, row.Name, row)
 		}
 		if !result.Pagination.HasMore {
 			snapshot.updatedAt = time.Now()
@@ -109,6 +109,29 @@ func (a *App) fetchBenchmarks(ctx context.Context) (benchmarkScores, error) {
 		}
 	}
 	return benchmarkScores{}, errors.New("too many model pages")
+}
+
+func indexBenchmarkModelName(index map[string]*benchmarkModel, name string, row *benchmarkModel) {
+	indexBenchmark(index, benchmarkName(name), row)
+	start := strings.LastIndex(name, " (")
+	if start < 0 || !strings.HasSuffix(name, ")") {
+		return
+	}
+	base := strings.TrimSpace(name[:start])
+	qualifier := strings.SplitN(name[start+2:len(name)-1], ",", 2)[0]
+	if effort := benchmarkEffort(qualifier); effort != "" {
+		indexBenchmark(index, benchmarkName(base+" "+effort), row)
+	}
+}
+
+func benchmarkEffort(value string) string {
+	effort := benchmarkName(value)
+	switch effort {
+	case "none", "non-reasoning", "low", "medium", "high", "xhigh", "x-high", "max":
+		return strings.ReplaceAll(effort, "x-high", "xhigh")
+	default:
+		return ""
+	}
 }
 
 func indexBenchmark(index map[string]*benchmarkModel, key string, row *benchmarkModel) {

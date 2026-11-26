@@ -125,8 +125,8 @@ func (agent taskAgent) tokensFor(model *benchmarkModel, effort string) float64 {
 	}
 	name := strings.TrimSpace(model.Name)
 	if start := strings.LastIndex(name, " ("); start >= 0 && strings.HasSuffix(name, ")") {
-		suffix := benchmarkName(name[start+2 : len(name)-1])
-		if suffix == effort || (effort == "none" && suffix == "non-reasoning") {
+		suffix := strings.SplitN(name[start+2:len(name)-1], ",", 2)[0]
+		if benchmarkEffort(suffix) == effort || (effort == "none" && benchmarkName(suffix) == "non-reasoning") {
 			name = name[:start]
 		}
 	}
