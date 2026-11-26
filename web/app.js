@@ -186,13 +186,7 @@ return box;
 }
 const {candidates,enabled,version,status}=data;
 if(status==='stale')box.append(el('p','评测数据同步遇到问题，正在使用上次成功的数据。','fine'));
-if(!candidates.length){
-const message=enabled?'暂无同时具备匹配评分、公开任务用量和当前时段倍率的已启用模型。':'暂无启用的模型。';
-box.append(el('p',message,'fine'),footer);
-return box;
-}
-const scores=candidates.map(model=>model.intelligence);
-const min=Math.min(0,Math.floor(Math.min(...scores))),max=Math.max(min+1,Math.ceil(Math.max(...scores)));
+const min=0,max=100;
 if(modelView.indexVersion!==version){modelView.indexVersion=version;modelView.intelligence=null;}
 const result=el('div',undefined,'efficiencyResult');
 result.setAttribute('role','status');
@@ -211,7 +205,10 @@ value.setAttribute('aria-hidden','true');
 const heading=el('div',undefined,'efficiencyControlHead');
 heading.append(label,value);
 const control=el('div',undefined,'efficiencyControl');
-control.append(heading,slider);
+const bounds=el('div',undefined,'efficiencyControlBounds');
+bounds.setAttribute('aria-hidden','true');
+bounds.append(el('span',String(min)),el('span',String(max)));
+control.append(heading,slider,bounds);
 const usage=new Intl.NumberFormat('zh-CN',{notation:'compact',maximumFractionDigits:2});
 function recommend(){
 const threshold=Number(slider.value);
@@ -219,7 +216,13 @@ modelView.intelligence=threshold;
 value.value=fmt(threshold);
 slider.setAttribute('aria-valuetext',fmt(threshold)+' 分');
 const winner=candidates.find(model=>model.intelligence>=threshold);
-if(!winner){result.replaceChildren(el('p','没有达到该 Intelligence 门槛的可比较模型。','fine'));return;}
+if(!winner){
+let message='没有达到该 Intelligence 门槛的可比较模型。';
+if(!enabled)message='暂无启用的模型。';
+else if(!candidates.length)message='暂无同时具备匹配评分、公开任务用量和当前时段倍率的已启用模型。';
+result.replaceChildren(el('p',message,'fine'));
+return;
+}
 const identity=el('div');
 identity.append(el('h3',winner.name),el('code',winner.id));
 const cost=el('div',undefined,'efficiencyRate');
@@ -229,7 +232,8 @@ result.replaceChildren(identity,cost,el('p',details.filter(Boolean).join(' · ')
 }
 slider.oninput=recommend;
 recommend();
-const coverage=`同一 Agent 下可比较 ${candidates.length} / ${enabled} 个已启用模型。`;
+const highest=Math.max(...candidates.map(model=>model.intelligence));
+const coverage=candidates.length?`同一 Agent 下可比较 ${candidates.length} / ${enabled} 个已启用模型，其中最高 Intelligence 为 ${fmt(highest)}。`:'';
 box.append(result,control,el('p',coverage+' 预估值为平均 Token/任务 × Trae 当期倍率。峰谷时段按北京时间，闲时价按非会员口径。','fine'),footer);
 return box;
 }
